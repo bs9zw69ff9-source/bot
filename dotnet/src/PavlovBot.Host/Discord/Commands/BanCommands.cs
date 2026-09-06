@@ -332,6 +332,25 @@ public sealed class CheckBanCommand(
             .AddField("Since", record.At is { } at ? Theme.Relative(at) : "unknown", true)
             .AddField("Expires", record.Permanent ? "Never" : Theme.Relative(record.Expires!.Value), true);
 
+        /* WHAT THE MODERATOR FIELD MEANS. "in-game" and "auto" are opaque, and the difference
+           between them is the difference between a ban this bot decided on and one it merely
+           read out of the game's own file - which is exactly the question somebody is asking
+           when a ban has no explanation they recognise. A reason can also OUTLIVE its cause:
+           the export writes it into banlist.txt and the import reads it back, so a verdict
+           from months ago goes on being quoted long after whatever produced it was cleared. */
+        embed.AddField("Where this came from", record.Moderator switch
+        {
+            "in-game" =>
+                "The game's own ban file, not this bot. It was imported from `MODSAVE_BLACKLIST_PATH` " +
+                "and re-applied - so the reason above may be old, and clearing the bot's blacklist " +
+                "will not touch it. `/unban` removes it from the file as well as the store.",
+            "auto" =>
+                "This bot, automatically - VPN screening or ban evasion. The reason above says which. " +
+                "Nothing a human typed is involved, and the blacklist in `/configure` is only the " +
+                "evasion half of it.",
+            _ => "A moderator, using the ban commands.",
+        }, inline: false);
+
         /* The ORIGINAL offence, when this record is an auto-ban. Otherwise /checkban answers
            "why are they banned" with "because they were banned", which helps nobody
            handling an appeal. */
