@@ -714,6 +714,48 @@ public static class Program
                 GameFiles.Problem(path) is { } problem ? $"  <-- {problem}" : "");
         }
 
+        /* THE BAN FILE THE BOT SYNCS AND THE ONE THE SERVER READS CAN BE DIFFERENT FILES,
+           and when they are, nothing about the symptom points at it. Pavlov reads its ban
+           file ITSELF, so a player listed in the one the bot does not manage is refused by
+           the SERVER while /banlist and /checkban answer "nothing" about him - and /unban
+           cannot take anybody out of a file it has never heard of, so the lift reports
+           success and he stays locked out. Both present as the bot banning people for no
+           reason.
+
+           The default lands on ModSave/banlist.txt, while the setup guide - and this bot's
+           own provisioner, which follows it - creates Config/blacklist.txt alongside
+           mods.txt and whitelist.txt. Finding one of those with entries in it while pointed
+           at the other is worth saying out loud, because it is not visible from anywhere
+           else. */
+        if (features.ModsaveBanlistPath is { Length: > 0 } banFile)
+        {
+            if (!File.Exists(banFile))
+            {
+                logger.LogWarning(
+                    "The ban file {Path} does not exist, so in-game bans are never imported and " +
+                    "/unban cannot remove anybody from it. Set MODSAVE_BLACKLIST_PATH to the file " +
+                    "your server actually reads", banFile);
+            }
+
+            foreach (var rival in installs
+                .Select(i => Path.Combine(i, "Pavlov", "Saved", "Config", "blacklist.txt"))
+                .Where(p => !string.Equals(p, banFile, StringComparison.Ordinal) && File.Exists(p)))
+            {
+                var listed = 0;
+                try { listed = File.ReadAllLines(rival).Count(l => l.Trim().Length > 0); }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { continue; }
+
+                if (listed == 0) continue;
+
+                logger.LogWarning(
+                    "{Rival} has {Lines} line(s) in it, and it is NOT the file this bot syncs " +
+                    "({Configured}). If the server reads that one, players listed there are banned " +
+                    "by the SERVER and this bot cannot see or lift them - /banlist and /checkban " +
+                    "will say they are not banned. Point MODSAVE_BLACKLIST_PATH at whichever file " +
+                    "your server actually enforces", rival, listed, banFile);
+            }
+        }
+
         logger.LogInformation("Feeds: {Status}",
             string.Join(" | ", feeds.Status.OrderBy(kv => kv.Key, StringComparer.Ordinal)
                 .Select(kv => $"{kv.Key}={kv.Value}")));

@@ -12,6 +12,27 @@ using PavlovBot.Host.Storage;
 namespace PavlovBot.Host.Discord.Commands;
 
 /// <summary>Shared plumbing for the commands that issue and lift bans.</summary>
+/// <summary>
+/// What "not banned" leaves unsaid.
+/// </summary>
+/// <remarks>
+/// THE BOT'S BAN STORE IS NOT THE ONLY THING THAT KEEPS A PLAYER OUT. Pavlov reads its own
+/// ban file directly, so somebody listed there is refused by the SERVER whatever this bot
+/// thinks - and the bot only sees or edits that file when MODSAVE_BLACKLIST_PATH points at
+/// it. Unset or wrong, the sync is off, no record is ever imported, and both /banlist and
+/// /checkban answer "nothing" about a player who cannot get in.
+///
+/// Said on the NEGATIVE answers only. That is where the gap is: a "yes, banned" reply is
+/// already the end of the question, and repeating this under every result would bury it.
+/// </remarks>
+internal static class BanFileCaveat
+{
+    public const string Text =
+        "If they are still refused in game, the server's own ban file lists them. " +
+        "Pavlov reads that file itself, so no RCON unban clears it - the bot only manages it " +
+        "when `MODSAVE_BLACKLIST_PATH` points at it. The startup log says whether it does.";
+}
+
 public abstract class BanCommandBase : ISlashCommand
 {
     protected BanCommandBase(
@@ -253,7 +274,8 @@ public sealed class UnbanCommand(
 
         if (existing is null)
         {
-            await Reply(command, Theme.Notice("No ban to lift", $"**{Sanitize.Code(player)}** is not banned.")).ConfigureAwait(false);
+            await Reply(command, Theme.Notice("No ban to lift",
+                $"**{Sanitize.Code(player)}** is not banned by this bot.\n\n{BanFileCaveat.Text}")).ConfigureAwait(false);
             return;
         }
 
@@ -313,7 +335,8 @@ public sealed class CheckBanCommand(
 
         if (record is null)
         {
-            await Reply(command, Theme.Success("No ban on record", $"**{Sanitize.Code(player)}** is not banned.")).ConfigureAwait(false);
+            await Reply(command, Theme.Success("No ban on record",
+                $"**{Sanitize.Code(player)}** is not banned by this bot.\n\n{BanFileCaveat.Text}")).ConfigureAwait(false);
             return;
         }
 
