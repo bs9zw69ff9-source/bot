@@ -22,6 +22,9 @@ public enum VpnBanOutcome
     /// <summary>Refused: a protected account.</summary>
     Master,
 
+    /// <summary>Reported, not actioned: automatic VPN banning is switched off.</summary>
+    Disabled,
+
     /// <summary>Skipped: exempt, or already banned.</summary>
     Exempt,
 
@@ -64,7 +67,8 @@ public sealed class VpnResponder(
     AuditLog audit,
     FeedWebhooks feeds,
     MetricsRegistry metrics,
-    ILogger<VpnResponder> logger)
+    ILogger<VpnResponder> logger,
+    bool autoBan = true)
 {
     /// <summary>
     /// How long one address stays actioned before it may ban again.
@@ -134,6 +138,27 @@ public sealed class VpnResponder(
             metrics.Increment("vpn_bans_total", MetricLabels.Of("outcome", "below_threshold", "stage", stage),
                 help: "VPN verdicts by what was done about them");
             return VpnBanOutcome.BelowThreshold;
+        }
+
+        /* THE SWITCH, CHECKED AFTER THE VERDICT AND BEFORE ANY CONSEQUENCE. Deliberately
+           here rather than at the top: with it off the screening still runs and the verdict
+           is still reported, so an operator can see what WOULD have been banned before
+           deciding to let it. A switch that also silenced the detection would make turning
+           it back on an act of faith. */
+        if (!autoBan)
+        {
+            if (announce)
+            {
+                logger.LogInformation(
+                    "VPN auto-ban is OFF (VPN_AUTOBAN) - {Player} @ {Ip} would have been banned at {Stage}: {Reason}",
+                    player, record.Ip, stage, decision.Reason);
+
+                await PostAsync($"[VPN] {Sanitize.Message(player)}  |  {VpnVerdict.Of(record).Headline}  |  " +
+                                "NOT BANNED - automatic VPN banning is off (VPN_AUTOBAN)").ConfigureAwait(false);
+            }
+
+            metrics.Increment("vpn_bans_total", MetricLabels.Of("outcome", "disabled", "stage", stage));
+            return VpnBanOutcome.Disabled;
         }
 
         if (masters.IsMaster(player))

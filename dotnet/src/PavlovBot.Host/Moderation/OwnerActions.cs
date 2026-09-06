@@ -81,8 +81,18 @@ public sealed class OwnerActions(
         lines.AddRange(flags.Names.Select(n => $"🚫 username **{n}**"));
         lines.AddRange(flags.Ids.Select(id => $"🚫 account `{id}`"));
 
+        /* "Nothing is blacklisted" IS A CORRECT ANSWER TO A DIFFERENT QUESTION, and on its
+           own it sent somebody looking here to explain an automatic ban away with the wrong
+           conclusion. This list is what an owner typed; the VPN screening bans on a verdict
+           nobody typed, and neither shows up in the other. Say so, but only when the list is
+           empty - under a real entry it would be noise. */
         return lines.Count == 0
-            ? OwnerActionResult.Done("Nothing is blacklisted.")
+            ? OwnerActionResult.Done(
+                "Nothing is blacklisted.\n\n" +
+                "This list is only what an owner blacklisted by hand. It is NOT the only thing " +
+                "that can ban somebody: VPN screening bans on its own verdict, and the game keeps " +
+                "its own ban list. Run `/checkban <name>` to see which one did it - an automatic " +
+                "ban shows `auto` as the moderator.")
             : OwnerActionResult.List($"**{lines.Count}** blacklist entr(ies).", lines);
     }
 

@@ -290,7 +290,15 @@ public static class Program
         builder.Services.AddSingleton<EvasionResponder>();
         /* Acts on a VPN verdict. Without it the screening ran on every connection, decided
            a ban, and nothing read the decision. */
-        builder.Services.AddSingleton<VpnResponder>();
+        builder.Services.AddSingleton(sp => new VpnResponder(
+            sp.GetRequiredService<BanService>(),
+            sp.GetRequiredService<IMasterNames>(),
+            sp.GetRequiredService<SerializedStore>(),
+            sp.GetRequiredService<AuditLog>(),
+            sp.GetRequiredService<FeedWebhooks>(),
+            sp.GetRequiredService<MetricsRegistry>(),
+            sp.GetRequiredService<ILogger<VpnResponder>>(),
+            features.VpnAutoBan));
         builder.Services.AddSingleton(sp => new MoneyLog(
             features.LedgerDirectory, sp.GetRequiredService<FeedWebhooks>(), sp.GetRequiredService<ILogger<MoneyLog>>()));
         /* ---- timeline ----
@@ -712,6 +720,39 @@ public static class Program
 
         if (host.Services.GetRequiredService<VpnScreeningService>().ConfigurationWarning() is { } warning)
             logger.LogWarning("{Warning}", warning);
+
+        /* SAID EVERY START, because this is the only thing in the bot that issues a PERMANENT
+           ban with no human in the loop, on a verdict from a third party that is wrong about
+           residential addresses often enough to matter. An operator should never have to work
+           out from a ban record whether it was on. */
+        var vpnScreening = host.Services.GetRequiredService<VpnScreeningService>();
+        var active = vpnScreening.Detectors.Select(d => d.Name).ToList();
+
+        logger.LogInformation("  VPN auto-ban: {State}", !features.VpnAutoBan
+            ? "OFF (VPN_AUTOBAN) - addresses are still screened and reported, never banned"
+            : active.Count == 0
+                ? "on, but no detector is configured, so nothing is screened and nothing can be banned"
+                : $"ON - {features.VpnThresholds.Sanitised().BanMin} of [{string.Join(", ", active)}] " +
+                  "must agree, and a match is a PERMANENT ban issued the moment they join. " +
+                  "Set VPN_AUTOBAN=0 to screen without banning");
+
+        /* THE TRAP THIS NAMES. Two of the detectors run WITHOUT AN API KEY, so a deployment
+           that configured no VPN keys at all still has two of them voting - and the default
+           threshold is two. Automatic permanent banning is therefore ON BY DEFAULT on the
+           free tiers of two providers, which are the ones most likely to be wrong about a
+           residential or mobile address. Nothing said so, and a false positive there is
+           indistinguishable from the bot banning somebody at random. */
+        if (features.VpnAutoBan && active.Count > 0 &&
+            vpnScreening.Detectors.Count(d => d.Tier == 1) >= features.VpnThresholds.Sanitised().BanMin &&
+            features.VpnKeys.Ipqs is null && features.VpnKeys.Sentinel is null && features.VpnKeys.IpHub is null)
+        {
+            logger.LogWarning(
+                "VPN auto-ban can trigger on KEYLESS detectors alone: [{Detectors}] need no API key, " +
+                "and {BanMin} agreeing is enough for a PERMANENT ban. Free tiers are the ones most " +
+                "likely to be wrong about a home or mobile address. Set VPN_AUTOBAN=0, or raise " +
+                "VPN_BAN_MIN, if that is not what you want",
+                string.Join(", ", active), features.VpnThresholds.Sanitised().BanMin);
+        }
 
         /* The ignore list is persisted but the tracker's copy is in memory, so it has to be
            loaded before the first log line is read. Without this the list survives a restart

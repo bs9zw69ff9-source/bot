@@ -208,6 +208,23 @@ public sealed record FeatureOptions
 
     public VpnKeys VpnKeys { get; init; } = new();
     public VpnThresholds VpnThresholds { get; init; } = VpnThresholds.Default;
+
+    /// <summary>
+    /// Whether a VPN verdict may issue an automatic PERMANENT ban. On unless turned off.
+    /// </summary>
+    /// <remarks>
+    /// THE ONE SWITCH THAT STOPS THE BOT BANNING PEOPLE BY ITSELF. Every other automatic ban
+    /// needs an explicit blacklist entry somebody typed; this one acts on a PROBABILISTIC
+    /// verdict from third-party providers, and those providers are wrong about residential
+    /// and mobile addresses often enough that the merge code carries an example of it - one
+    /// of them calls Cloudflare's own resolver "vpn+abuser". A false positive here is a
+    /// permanent ban on somebody who did nothing, issued in the seconds after they joined.
+    ///
+    /// Off still SCREENS and still REPORTS: the connection card, the feed line and the log
+    /// all say what the verdict was. It only withholds the consequence, which is the part a
+    /// human can be in the loop for.
+    /// </remarks>
+    public bool VpnAutoBan { get; init; } = true;
     public TimeSpan VpnCacheTtl { get; init; } = TimeSpan.FromDays(30);
 
     /// <summary>
@@ -328,6 +345,11 @@ public sealed record FeatureOptions
             /* VPN_BAN_MIN is the current name; VPN_SCREEN_BAN_MIN is what it used to be
                called, kept working so an existing .env is not silently reset to the default
                the first time somebody deploys this. */
+            /* DEFAULTS ON, so this is not a silent behaviour change for anyone who has it
+               working - but it is a plain switch rather than something to be discovered by
+               deleting API keys. */
+            VpnAutoBan = OptionalFlag(configuration, "VPN_AUTOBAN") != false,
+
             VpnThresholds = new VpnThresholds(
                 Int(configuration, "VPN_SCREEN_MIN", 1),
                 Int(configuration, "VPN_CONFIRM_MIN", 1),
