@@ -13,7 +13,7 @@ namespace PavlovBot.Tests;
 /// twenty digits threw before the arithmetic was even reached.
 ///
 /// EVERY ONE OF THESE IS REACHABLE. A moderator's typo in <c>/tempban</c> is the obvious one.
-/// The one that matters more is <c>ModsaveBanlist</c>, which parses the GAME'S OWN
+/// The one that matters more is <c>ServerBanFile</c>, which parses the GAME'S OWN
 /// <c>banlist.txt</c> - foreign data, written by another process - inside a
 /// <c>store.UpdateAsync</c>. One malformed line there threw out of the import and lost the
 /// whole batch, which is the same shape as the log-tail crash: a throw partway through a loop

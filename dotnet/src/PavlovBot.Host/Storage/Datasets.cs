@@ -59,7 +59,7 @@ public static class Datasets
     /// Players deliberately unbanned, and when. Name -> lift instant.
     /// </summary>
     /// <remarks>
-    /// THE GUARD AGAINST A LIFT BEING UNDONE BY THE NEXT SYNC. ModsaveBanlist imports the
+    /// THE GUARD AGAINST A LIFT BEING UNDONE BY THE NEXT SYNC. ServerBanFile imports the
     /// game's own ban file and treats anything not already in the store as a ban to create.
     /// An unban removes the store record, but the FILE still lists them until the next export
     /// - so the import five minutes later saw a name it did not recognise and re-created the

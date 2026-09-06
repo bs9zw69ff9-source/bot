@@ -82,7 +82,7 @@ public class FactionBotTests
 /// file a banned player's message is written to went somewhere the game never reads, and
 /// MODSAVE_BLACKLIST_PATH was ignored entirely.
 /// </remarks>
-public class ModsaveBanlistPathTests
+public class BanFilePathTests
 {
     private static FeatureOptions Bind(params (string Key, string Value)[] settings) =>
         FeatureOptions.Bind(new ConfigurationBuilder()
@@ -97,27 +97,53 @@ public class ModsaveBanlistPathTests
             ("PAVLOV_BASE_1", "/home/steam/pavlovserver"),
             ("MODSAVE_PATH", "/home/steam/pavlovserver/Pavlov/Saved/Config/ModSave"));
 
-        Assert.Equal("/custom/banlist.txt", options.ModsaveBanlistPath);
+        Assert.Equal("/custom/banlist.txt", options.BanFilePath);
+    }
+
+    [Fact]
+    public void TheLegacyNameStillBindsSoAnExistingEnvKeepsWorking()
+    {
+        /* MODSAVE_BLACKLIST_PATH is what deployments already set. Dropping it would point
+           them back at the default without a word, which is the exact failure this whole
+           change is about. */
+        var options = Bind(("MODSAVE_BLACKLIST_PATH", "/legacy/blacklist.txt"));
+
+        Assert.Equal("/legacy/blacklist.txt", options.BanFilePath);
+    }
+
+    [Fact]
+    public void TheNewNameWinsWhenBothAreSet()
+    {
+        var options = Bind(
+            ("BLACKLIST_PATH", "/new/blacklist.txt"),
+            ("MODSAVE_BLACKLIST_PATH", "/legacy/blacklist.txt"));
+
+        Assert.Equal("/new/blacklist.txt", options.BanFilePath);
     }
 
     [Fact]
     public void ItIsDerivedFromTheInstallRoot_NotFromTheLedgerDirectory()
     {
-        // The ledger directory IS .../Config/ModSave, so appending ModSave again produced
-        // .../Config/ModSave/ModSave/banlist.txt.
+        /* The ledger directory IS .../Config/ModSave, and this used to be built from it -
+           which produced .../Config/ModSave/ModSave/banlist.txt. It comes off the install
+           root, and no longer goes near ModSave at all. */
         var options = Bind(
             ("PAVLOV_BASE_1", "/home/steam/pavlovserver"),
             ("MODSAVE_PATH", "/home/steam/pavlovserver/Pavlov/Saved/Config/ModSave"));
 
-        Assert.Equal("/home/steam/pavlovserver/Pavlov/Saved/Config/ModSave/banlist.txt",
-            options.ModsaveBanlistPath);
-        Assert.DoesNotContain("ModSave/ModSave", options.ModsaveBanlistPath, StringComparison.Ordinal);
+        Assert.Equal("/home/steam/pavlovserver/Pavlov/Saved/Config/blacklist.txt",
+            options.BanFilePath);
+        Assert.DoesNotContain("ModSave", options.BanFilePath, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void TheDefaultRootMatchesTheNodeBot()
+    public void TheDefaultIsTheFileTheSERVERReads()
     {
-        // index.js: PAVLOV_BASE_1 || "/home/steam/pavlovserver"
-        Assert.Equal("/home/steam/pavlovserver/Pavlov/Saved/Config/ModSave/banlist.txt", Bind().ModsaveBanlistPath);
+        /* Config/blacklist.txt, beside mods.txt and whitelist.txt - the file the setup guide
+           creates and the server enforces. It used to default to ModSave/banlist.txt, a
+           different file belonging to a mod: the bot synced that one while the server read
+           this one, so a player listed here was refused by the server while /banlist and
+           /checkban said he was not banned and /unban could not reach him. */
+        Assert.Equal("/home/steam/pavlovserver/Pavlov/Saved/Config/blacklist.txt", Bind().BanFilePath);
     }
 }

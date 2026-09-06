@@ -9,7 +9,7 @@ using PavlovBot.Host.Storage;
 namespace PavlovBot.Host.Moderation;
 
 /// <param name="Unban">The raw "Unban:" line, e.g. "3d 4h" or "Permanent".</param>
-public sealed record ModsaveEntry(string Name, string Reason, string Unban);
+public sealed record BanFileEntry(string Name, string Reason, string Unban);
 
 /// <summary>
 /// The game's own ban-list file: the message a banned player sees, and a way in.
@@ -29,8 +29,8 @@ public sealed record ModsaveEntry(string Name, string Reason, string Unban);
 /// That means the file goes stale as the clock moves, which is why it is rewritten on every
 /// sync rather than only on change.
 /// </remarks>
-public sealed class ModsaveBanlist(
-    string? path, SerializedStore store, ILogger<ModsaveBanlist> logger, TimeProvider? time = null,
+public sealed class ServerBanFile(
+    string? path, SerializedStore store, ILogger<ServerBanFile> logger, TimeProvider? time = null,
     Func<string, string?>? resolveName = null,
     Storage.GameFileGuard? guard = null) : IBanFileExport
 {
@@ -82,7 +82,7 @@ public sealed class ModsaveBanlist(
             if (!_pathWarned)
             {
                 _pathWarned = true;
-                logger.LogError("Not writing the ModSave ban list: {Problem}", problem);
+                logger.LogError("Not writing the server ban file: {Problem}", problem);
             }
             return 0;
         }
@@ -96,7 +96,7 @@ public sealed class ModsaveBanlist(
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            logger.LogWarning(ex, "Could not write the modsave ban list");
+            logger.LogWarning(ex, "Could not write the server ban file");
             return 0;
         }
     }
@@ -168,24 +168,47 @@ public sealed class ModsaveBanlist(
     /// than treated as a player called "Reason" - which is what a trailing blank line or a
     /// hand-edit produces.
     /// </remarks>
-    public static IReadOnlyList<ModsaveEntry> Parse(string contents)
-    {
-        var entries = new List<ModsaveEntry>();
+    /// <summary>The reason recorded for a ban this bot did not issue.</summary>
+    internal const string DefaultReason = "Imported from the server's ban list";
 
-        foreach (var block in (contents ?? "").Split("\n\n", StringSplitOptions.RemoveEmptyEntries))
+    /// <summary>A "Reason:"/"Unban:"/"Appeal:" line from the old ModSave block format.</summary>
+    private static bool IsMetadata(string line) =>
+        line.StartsWith("Reason:", StringComparison.OrdinalIgnoreCase) ||
+        line.StartsWith("Unban:", StringComparison.OrdinalIgnoreCase) ||
+        line.StartsWith("Appeal:", StringComparison.OrdinalIgnoreCase);
+
+    public static IReadOnlyList<BanFileEntry> Parse(string contents)
+    {
+        var entries = new List<BanFileEntry>();
+
+        foreach (var block in (contents ?? "").Replace("\r\n", "\n", StringComparison.Ordinal)
+                     .Split("\n\n", StringSplitOptions.RemoveEmptyEntries))
         {
-            var lines = block.Split('\n').Select(l => l.Trim()).Where(l => l.Length > 0).ToList();
+            var lines = block.Split('\n')
+                .Select(l => l.Trim())
+                .Where(l => l.Length > 0 && !l.StartsWith('#') && !l.StartsWith("//", StringComparison.Ordinal))
+                .ToList();
             if (lines.Count == 0) continue;
 
-            var name = lines[0];
-            if (name.StartsWith("Reason:", StringComparison.OrdinalIgnoreCase) ||
-                name.StartsWith("Unban:", StringComparison.OrdinalIgnoreCase) ||
-                name.StartsWith("Appeal:", StringComparison.OrdinalIgnoreCase))
+            /* BOTH SHAPES, and getting this wrong loses people silently. A plain
+               one-per-line list has no blank lines in it, so the WHOLE FILE arrives here as
+               a single block: read as one Reason/Unban record it would import the first name
+               and discard every other line as unrecognised metadata. Everybody but the first
+               player would quietly stop being banned.
+
+               A block is metadata-shaped only if something after its first line actually
+               says Reason, Unban or Appeal. Otherwise every line in it is its own entry. */
+            if (!lines.Skip(1).Any(IsMetadata))
             {
+                foreach (var line in lines.Where(l => !IsMetadata(l)))
+                    entries.Add(new BanFileEntry(line, DefaultReason, "Permanent"));
                 continue;
             }
 
-            var reason = "Imported from the in-game ban list";
+            var name = lines[0];
+            if (IsMetadata(name)) continue;
+
+            var reason = DefaultReason;
             var unban = "Permanent";
 
             foreach (var line in lines.Skip(1))
@@ -200,7 +223,7 @@ public sealed class ModsaveBanlist(
                 else if (split[0].Trim().Equals("Unban", StringComparison.OrdinalIgnoreCase)) unban = value;
             }
 
-            entries.Add(new ModsaveEntry(name, reason, unban));
+            entries.Add(new BanFileEntry(name, reason, unban));
         }
         return entries;
     }
@@ -218,7 +241,7 @@ public sealed class ModsaveBanlist(
     {
         if (!Enabled || !File.Exists(path)) return 0;
 
-        IReadOnlyList<ModsaveEntry> parsed;
+        IReadOnlyList<BanFileEntry> parsed;
         try
         {
             parsed = Parse(await File.ReadAllTextAsync(path!, ct).ConfigureAwait(false));
