@@ -64,7 +64,7 @@ public class TempBanExpiryTests
     [InlineData("expired")]
     [InlineData(" 0m ")]
     public void AnUnbanValueWithNoTimeLeftIsRecognisedAsElapsed(string unban) =>
-        Assert.True(ModsaveBanlist.DenotesElapsed(unban),
+        Assert.True(ServerBanFile.DenotesElapsed(unban),
             $"\"{unban}\" means the ban has served its time, not that it is permanent");
 
     [Theory]
@@ -75,7 +75,7 @@ public class TempBanExpiryTests
     [InlineData("")]
     [InlineData(null)]
     public void EverythingElseIsLeftToTheNormalParser(string? unban) =>
-        Assert.False(ModsaveBanlist.DenotesElapsed(unban),
+        Assert.False(ServerBanFile.DenotesElapsed(unban),
             $"\"{unban}\" is not an elapsed span and must not be treated as one");
 
     [Fact]
@@ -84,7 +84,7 @@ public class TempBanExpiryTests
         /* The regression that would matter most in the other direction. Making elapsed values
            expire must not make a genuine permanent ban expire too - that would quietly free
            everybody the staff meant to keep out. */
-        Assert.False(ModsaveBanlist.DenotesElapsed("Permanent"));
+        Assert.False(ServerBanFile.DenotesElapsed("Permanent"));
         Assert.Null(EasternTime.ParseBanSpan("Permanent"));
     }
 }

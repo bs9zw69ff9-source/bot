@@ -20,15 +20,15 @@ public class BanIdentityAndAttachmentTests
         /* Pavlov writes the UniqueID as the block header for bans made in-game, so importing
            it verbatim filed those under a 32-character id while the bot's own bans used
            names - the same player appearing as two unrelated entries. */
-        Assert.Equal("Holosight1", ModsaveBanlist.ResolveName(Eos, id => id == Eos ? "Holosight1" : null));
+        Assert.Equal("Holosight1", ServerBanFile.ResolveName(Eos, id => id == Eos ? "Holosight1" : null));
     }
 
     [Fact]
     public void AnUnknownIdKeepsTheIdRatherThanBeingDropped()
     {
         // A ban you cannot name is still a ban. Showing it awkwardly beats losing it.
-        Assert.Equal(Eos, ModsaveBanlist.ResolveName(Eos, _ => null));
-        Assert.Equal(Eos, ModsaveBanlist.ResolveName(Eos, _ => "   "));
+        Assert.Equal(Eos, ServerBanFile.ResolveName(Eos, _ => null));
+        Assert.Equal(Eos, ServerBanFile.ResolveName(Eos, _ => "   "));
     }
 
     [Fact]
@@ -36,10 +36,10 @@ public class BanIdentityAndAttachmentTests
     {
         // Bans the bot wrote itself already carry a username, and a resolver that returned
         // something else for one would rename a ban out from under the moderator who made it.
-        Assert.Equal("Alice", ModsaveBanlist.ResolveName("Alice", _ => null));
+        Assert.Equal("Alice", ServerBanFile.ResolveName("Alice", _ => null));
     }
 
     [Fact]
     public void WithNoResolverConfiguredNothingChanges()
-        => Assert.Equal(Eos, ModsaveBanlist.ResolveName(Eos, resolve: null));
+        => Assert.Equal(Eos, ServerBanFile.ResolveName(Eos, resolve: null));
 }

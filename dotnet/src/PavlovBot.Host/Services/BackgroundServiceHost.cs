@@ -40,7 +40,7 @@ public sealed class BackgroundServiceHost : IHostedService
     private readonly SqliteKeyValueBackend _backend;
     private readonly Boards _boards;
     private readonly AutoPost _autoPost;
-    private readonly ModsaveBanlist _modsave;
+    private readonly ServerBanFile _modsave;
     private readonly RosterService _rosters;
     private readonly PavlovBot.Core.Data.SerializedStore _store;
     /// <summary>
@@ -82,7 +82,7 @@ public sealed class BackgroundServiceHost : IHostedService
         SqliteKeyValueBackend backend,
         Boards boards,
         AutoPost autoPost,
-        ModsaveBanlist modsave,
+        ServerBanFile modsave,
         RosterService rosters,
         PavlovBot.Core.Data.SerializedStore store,
         PavlovBot.Host.Logs.FeedBridge bridge,

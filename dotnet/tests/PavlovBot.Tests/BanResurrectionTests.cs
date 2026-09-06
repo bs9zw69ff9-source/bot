@@ -15,7 +15,7 @@ namespace PavlovBot.Tests;
 /// record went, the native unban was sent - and a few minutes later the player was banned
 /// again, with nobody having done anything.
 ///
-/// THE LOOP. ModsaveBanlist syncs the game's own ban file every five minutes, IMPORTING
+/// THE LOOP. ServerBanFile syncs the game's own ban file every five minutes, IMPORTING
 /// first, and the importer treats any name in that file which is not in the store as a ban to
 /// create. An unban removed the store record and left the FILE untouched, so:
 ///
@@ -41,14 +41,14 @@ public class BanResurrectionTests : IDisposable
 
     private readonly SerializedStore _store;
     private readonly string _banFile;
-    private readonly ModsaveBanlist _modsave;
+    private readonly ServerBanFile _modsave;
 
     public BanResurrectionTests()
     {
         Directory.CreateDirectory(_directory);
         _store = new SerializedStore(new FileKeyValueBackend(_directory), new SystemTextJsonCodec());
         _banFile = Path.Combine(_directory, "blacklist.txt");
-        _modsave = new ModsaveBanlist(_banFile, _store, NullLogger<ModsaveBanlist>.Instance);
+        _modsave = new ServerBanFile(_banFile, _store, NullLogger<ServerBanFile>.Instance);
     }
 
     /// <summary>The game's ban file, in the format Pavlov writes.</summary>
@@ -107,7 +107,7 @@ public class BanResurrectionTests : IDisposable
     public async Task AnExpiredTombstoneNoLongerBlocksTheImport()
     {
         await WriteBanFileAsync(Name);
-        await TombstoneAsync(Name, DateTimeOffset.UtcNow - ModsaveBanlist.TombstoneLife - TimeSpan.FromDays(1));
+        await TombstoneAsync(Name, DateTimeOffset.UtcNow - ServerBanFile.TombstoneLife - TimeSpan.FromDays(1));
 
         await _modsave.ImportAsync();
 
@@ -176,8 +176,8 @@ public class BanResurrectionTests : IDisposable
     private const string AccountId = "0002abcdef0123456789abcdef012345";
 
     /// <summary>An importer that knows this id belongs to <see cref="Name"/>.</summary>
-    private ModsaveBanlist Resolving() =>
-        new(_banFile, _store, NullLogger<ModsaveBanlist>.Instance,
+    private ServerBanFile Resolving() =>
+        new(_banFile, _store, NullLogger<ServerBanFile>.Instance,
             time: null,
             resolveName: id => string.Equals(id, AccountId, StringComparison.Ordinal) ? Name : null);
 

@@ -431,7 +431,7 @@ public sealed class BanService
 
         /* ---- stop the lift being undone ----
 
-           THE BUG THIS FIXES. ModsaveBanlist syncs the game's own ban file every five
+           THE BUG THIS FIXES. ServerBanFile syncs the game's own ban file every five
            minutes, IMPORTING first: any name in the file that is not in the store is treated
            as a ban to create. Removing the record above leaves the FILE still listing them,
            so the next import re-created the ban that had just been lifted, the export wrote
@@ -545,7 +545,7 @@ public interface IMasterNames
 /// </remarks>
 /// <summary>The game's own ban file, rewritten from the store.</summary>
 /// <remarks>
-/// A NARROW SEAM so BanService does not depend on ModsaveBanlist. Lifting a ban has to
+/// A NARROW SEAM so BanService does not depend on ServerBanFile. Lifting a ban has to
 /// rewrite that file: the GAME reads it, so a player who stays listed there stays banned
 /// however many Unban commands RCON accepts - and the importer would re-create the record
 /// on its next pass anyway.

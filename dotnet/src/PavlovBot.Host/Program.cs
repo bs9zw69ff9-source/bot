@@ -203,11 +203,11 @@ public static class Program
             /* LIFTING A BAN HAS TO REWRITE THE GAME'S BAN FILE. The server reads that file
                itself, so a player left listed in it stays banned however many Unban commands
                RCON accepts - and the importer would re-create the record on its next pass.
-               Resolved lazily inside the lambda: ModsaveBanlist is registered just below. */
-            banFile: sp.GetRequiredService<ModsaveBanlist>()));
-        builder.Services.AddSingleton(sp => new ModsaveBanlist(
-            features.ModsaveBanlistPath, sp.GetRequiredService<SerializedStore>(),
-            sp.GetRequiredService<ILogger<ModsaveBanlist>>(),
+               Resolved lazily inside the lambda: ServerBanFile is registered just below. */
+            banFile: sp.GetRequiredService<ServerBanFile>()));
+        builder.Services.AddSingleton(sp => new ServerBanFile(
+            features.BanFilePath, sp.GetRequiredService<SerializedStore>(),
+            sp.GetRequiredService<ILogger<ServerBanFile>>(),
             time: null,
             /* Resolved lazily INSIDE the lambda, so this does not depend on IpTrackingService
                being registered first - the import runs long after startup either way. */
@@ -703,7 +703,7 @@ public static class Program
            directory tree created beside the real one that the game never reads. */
         foreach (var (label, path) in new[]
         {
-            ("ModSave ban list", features.ModsaveBanlistPath),
+            ("server ban file", features.BanFilePath),
             ("economy ledger", features.LedgerDirectory is { } d ? Path.Combine(d, "<player>.txt") : null),
             ("faction rosters", features.RosterDirectory is { } r ? Path.Combine(r, "<roster>.txt") : null),
         }.Concat(installs.Select(i => ("whitelist", (string?)PavlovInstalls.WhitelistPath(i)))))
@@ -727,7 +727,7 @@ public static class Program
            mods.txt and whitelist.txt. Finding one of those with entries in it while pointed
            at the other is worth saying out loud, because it is not visible from anywhere
            else. */
-        if (features.ModsaveBanlistPath is { Length: > 0 } banFile)
+        if (features.BanFilePath is { Length: > 0 } banFile)
         {
             if (!File.Exists(banFile))
             {

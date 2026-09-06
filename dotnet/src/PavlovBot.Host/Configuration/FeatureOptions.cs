@@ -47,7 +47,7 @@ public sealed record FeatureOptions
     public bool? SystemctlSudo { get; init; }
 
     /// <summary>The game's own ban-list file - the message a banned player sees.</summary>
-    public string? ModsaveBanlistPath { get; init; }
+    public string? BanFilePath { get; init; }
 
     /// <summary>Where plugin assemblies live. Null uses ./plugins.</summary>
     public string? PluginDirectory { get; init; }
@@ -285,16 +285,23 @@ public sealed record FeatureOptions
             IgnoredPaths = List(configuration, "IGNORE_PATHS"),
             PavlovUnits = PavlovBot.Host.Servers.ServiceControl.ParseUnits(Text(configuration, "PAVLOV_UNITS")),
             SystemctlSudo = OptionalFlag(configuration, "PAVLOV_SYSTEMCTL_SUDO"),
-            /* Resolved the way the Node bot resolves it: an explicit override first, then
-               derived from the server install root. It was previously built as
-               <MODSAVE_PATH>/ModSave/banlist.txt - but MODSAVE_PATH already points AT the
-               ModSave directory, so that was a doubled path that does not exist, and
-               MODSAVE_BLACKLIST_PATH was ignored entirely. The ban-message file was
-               therefore written somewhere the game never reads. */
-            ModsaveBanlistPath = Text(configuration, "MODSAVE_BLACKLIST_PATH")
+            /* THE FILE THE SERVER ACTUALLY READS, which is Config/blacklist.txt - the one
+               the setup guide creates beside mods.txt and whitelist.txt, and the one this
+               bot's own provisioner creates.
+
+               It used to default to Config/ModSave/banlist.txt, a DIFFERENT file belonging
+               to a mod. The bot synced that one while the server enforced this one, so a
+               player listed here was refused by the SERVER while /banlist and /checkban
+               reported nothing about him and /unban could not reach him. That is the whole
+               of the bug this default fixes.
+
+               MODSAVE_BLACKLIST_PATH is still read, because an existing .env sets it and
+               having it silently ignored is how the previous version of this went wrong. */
+            BanFilePath = Text(configuration, "BLACKLIST_PATH")
+                ?? Text(configuration, "MODSAVE_BLACKLIST_PATH")
                 ?? System.IO.Path.Combine(
                     Text(configuration, "PAVLOV_BASE_1") ?? "/home/steam/pavlovserver",
-                    "Pavlov", "Saved", "Config", "ModSave", "banlist.txt"),
+                    "Pavlov", "Saved", "Config", "blacklist.txt"),
 
             /* Two DIFFERENT webhooks. CONNECT carries addresses and belongs in a private
                channel; JOIN is the plain public log. The port read CONNECT into the join

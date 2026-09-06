@@ -81,7 +81,7 @@ public class BanLiftTests : IAsyncDisposable
         }
     }
 
-    /// <summary>The game's ban file, as ModsaveBanlist would rewrite it.</summary>
+    /// <summary>The game's ban file, as ServerBanFile would rewrite it.</summary>
     private sealed class RecordingBanFile : IBanFileExport
     {
         public int Exports { get; private set; }
@@ -308,7 +308,7 @@ public class BanLiftTests : IAsyncDisposable
     /// </summary>
     /// <remarks>
     /// The server reads that file itself, so a player left listed in it stays banned however
-    /// many Unban commands RCON accepts - and ModsaveBanlist's importer, which runs every five
+    /// many Unban commands RCON accepts - and ServerBanFile's importer, which runs every five
     /// minutes and treats any name in the file that is not in the store as a ban to create,
     /// re-created the record that had just been lifted. The export then wrote it back and the
     /// sweep enforced it.

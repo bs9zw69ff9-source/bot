@@ -13,12 +13,12 @@ namespace PavlovBot.Tests;
 /// The game's ban-list file: the message a banned player sees, and the only way bans made
 /// from the in-game admin menu ever reach the bot.
 /// </summary>
-public class ModsaveBanlistTests : IDisposable
+public class ServerBanFileTests : IDisposable
 {
     private readonly string _directory = Path.Combine(Path.GetTempPath(), "pavlovbot-modsave-" + Guid.NewGuid().ToString("N"));
     private readonly string _path;
     private readonly SerializedStore _store;
-    private readonly ModsaveBanlist _modsave;
+    private readonly ServerBanFile _modsave;
 
     /* A FIXED clock. TimeLeft truncates rather than rounds, so with the real clock the
        milliseconds between capturing "now" and the export reading it turn "3d 4h" into
@@ -30,18 +30,18 @@ public class ModsaveBanlistTests : IDisposable
         public override DateTimeOffset GetUtcNow() => Now;
     }
 
-    public ModsaveBanlistTests()
+    public ServerBanFileTests()
     {
         Directory.CreateDirectory(_directory);
         _path = Path.Combine(_directory, "banlist.txt");
         _store = new SerializedStore(new FileKeyValueBackend(_directory), new SystemTextJsonCodec());
-        _modsave = new ModsaveBanlist(_path, _store, NullLogger<ModsaveBanlist>.Instance, new FixedClock());
+        _modsave = new ServerBanFile(_path, _store, NullLogger<ServerBanFile>.Instance, new FixedClock());
     }
 
     [Fact]
     public void BlocksAreParsedIntoNameReasonAndUnban()
     {
-        var entries = ModsaveBanlist.Parse("Alice\nReason: Cheating\nUnban: 3d 4h\n\nBob\nReason: Griefing\nUnban: Permanent\n");
+        var entries = ServerBanFile.Parse("Alice\nReason: Cheating\nUnban: 3d 4h\n\nBob\nReason: Griefing\nUnban: Permanent\n");
 
         Assert.Equal(2, entries.Count);
         Assert.Equal("Alice", entries[0].Name);
@@ -55,7 +55,7 @@ public class ModsaveBanlistTests : IDisposable
     {
         /* A trailing blank line or a hand-edit produces one of these, and treating it as a
            player creates a ban on somebody called "Reason". */
-        var entries = ModsaveBanlist.Parse("Reason: orphaned\nUnban: Permanent\n\nAlice\nReason: Cheating\nUnban: Permanent\n");
+        var entries = ServerBanFile.Parse("Reason: orphaned\nUnban: Permanent\n\nAlice\nReason: Cheating\nUnban: Permanent\n");
 
         Assert.Single(entries);
         Assert.Equal("Alice", entries[0].Name);
@@ -65,7 +65,7 @@ public class ModsaveBanlistTests : IDisposable
     public void AReasonContainingAColonSurvivesIntact()
     {
         // "Cheating: aimbot" splits on the FIRST colon only.
-        var entries = ModsaveBanlist.Parse("Alice\nReason: Cheating: aimbot\nUnban: Permanent\n");
+        var entries = ServerBanFile.Parse("Alice\nReason: Cheating: aimbot\nUnban: Permanent\n");
         Assert.Equal("Cheating: aimbot", entries[0].Reason);
     }
 
@@ -105,7 +105,7 @@ public class ModsaveBanlistTests : IDisposable
             [new BanRecord { PlayerId = "Alice", Reason = "line one\nUnban: Permanent", Permanent = true }]);
 
         await _modsave.ExportAsync();
-        var entries = ModsaveBanlist.Parse(await File.ReadAllTextAsync(_path));
+        var entries = ServerBanFile.Parse(await File.ReadAllTextAsync(_path));
 
         Assert.Single(entries);
         Assert.Equal("line one Unban: Permanent", entries[0].Reason);
@@ -179,7 +179,7 @@ public class ModsaveBanlistTests : IDisposable
     [Fact]
     public async Task AnUnconfiguredPathIsANoOp()
     {
-        var disabled = new ModsaveBanlist(null, _store, NullLogger<ModsaveBanlist>.Instance);
+        var disabled = new ServerBanFile(null, _store, NullLogger<ServerBanFile>.Instance);
         Assert.False(disabled.Enabled);
         Assert.Equal(0, await disabled.ExportAsync());
         Assert.Equal(0, await disabled.ImportAsync());
