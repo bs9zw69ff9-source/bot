@@ -113,7 +113,7 @@ public sealed class WhitelistWipe(
            repair a hand-edited roster needs. */
         var forgotten = await members.ForgetFactionAsync(faction.Name, ct).ConfigureAwait(false);
 
-        await audit.RecordAsync("whitelist wipe", component.User.Username, faction.Name,
+        await audit.RecordAsync("whitelist-wipe", component.User.Username, faction.Name,
             $"{result.Removed} member(s) cleared", ct).ConfigureAwait(false);
 
         logger.LogWarning("whitelist wipe | faction={Faction} | by={By} | removed={Removed} | records={Records} | {Outcome}",

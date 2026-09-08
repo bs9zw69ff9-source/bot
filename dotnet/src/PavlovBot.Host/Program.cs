@@ -371,11 +371,13 @@ public static class Program
             sp.GetRequiredService<RosterService>(),
             sp.GetRequiredService<PavlovBot.Host.Factions.FactionMembers>(),
             sp.GetRequiredService<Access>(),
+            sp.GetRequiredService<PavlovBot.Host.Moderation.AuditLog>(),
             sp.GetRequiredService<ILogger<RankChangeCommand>>()));
         builder.Services.AddSingleton<ISlashCommand>(sp => RankChangeCommand.Demotion(
             sp.GetRequiredService<RosterService>(),
             sp.GetRequiredService<PavlovBot.Host.Factions.FactionMembers>(),
             sp.GetRequiredService<Access>(),
+            sp.GetRequiredService<PavlovBot.Host.Moderation.AuditLog>(),
             sp.GetRequiredService<ILogger<RankChangeCommand>>()));
         builder.Services.AddSingleton<ISlashCommand, WarrantCommand>();
         builder.Services.AddSingleton<ISlashCommand, ArrestCommand>();

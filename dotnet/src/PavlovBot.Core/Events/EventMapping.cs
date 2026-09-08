@@ -37,6 +37,11 @@ public static class EventMapping
         ["whitelist"] = EventCategory.Faction,
         ["whitelist-add"] = EventCategory.Faction,
         ["whitelist-remove"] = EventCategory.Faction,
+        ["whitelist-wipe"] = EventCategory.Faction,
+
+        // The wipe recorded itself with a SPACE before it was hyphenated to match the rest.
+        // Kept so records already in the timeline categorise the same way they did.
+        ["whitelist wipe"] = EventCategory.Faction,
         ["promotion"] = EventCategory.Faction,
         ["demotion"] = EventCategory.Faction,
         ["subclass"] = EventCategory.Faction,
