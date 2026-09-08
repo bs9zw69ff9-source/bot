@@ -21,6 +21,24 @@ public sealed class WhitelistCommand(RosterService rosters, FactionMembers membe
 {
     public string Name => "whitelist";
 
+    /// <summary>Only the person who ran it sees the reply.</summary>
+    /// <remarks>
+    /// ROSTER WORK IS ADMIN TRAFFIC, not something a channel needs a copy of. Every
+    /// subcommand here names a player and what was done to them, and running a few of them
+    /// in a row filled whatever channel the moderator happened to be standing in.
+    ///
+    /// THE AUDIT TRAIL IS NOT WHAT THIS HIDES, which is the only reason it is safe to do.
+    /// AuditLog records every change and the staff log channels still receive them, so what
+    /// stops being public is the operator's own console output - not the record of it. A
+    /// moderator who wants to show somebody the result can say so; one who does not should
+    /// not have to.
+    ///
+    /// The wipe confirmation goes ephemeral with everything else. Its component carries the
+    /// id of whoever opened it and re-checks access on the click, so it was never the public
+    /// message that made it safe.
+    /// </remarks>
+    public bool Ephemeral => true;
+
     public ApplicationCommandProperties Build()
     {
         SlashCommandOptionBuilder Faction()
