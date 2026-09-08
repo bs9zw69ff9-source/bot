@@ -2,6 +2,7 @@ using Discord;
 using Microsoft.Extensions.Logging.Abstractions;
 using PavlovBot.Core.Data;
 using PavlovBot.Host.Discord;
+using PavlovBot.Host.Moderation;
 using PavlovBot.Host.Discord.Commands;
 using PavlovBot.Host.Events;
 using PavlovBot.Host.Factions;
@@ -82,6 +83,7 @@ public class SlashCommandValidationTests
             new FactionMembers(store),
             new Access(store, [], []),
             new Boards(store, rcon),
+            new AuditLog(store),
             NullLogger<WhitelistCommand>.Instance);
 
         var built = command.Build();

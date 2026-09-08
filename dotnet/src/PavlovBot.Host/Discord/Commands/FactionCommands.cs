@@ -5,6 +5,7 @@ using PavlovBot.Core.Data;
 using PavlovBot.Core.Factions;
 using PavlovBot.Core.Text;
 using PavlovBot.Host.Factions;
+using PavlovBot.Host.Moderation;
 
 namespace PavlovBot.Host.Discord.Commands;
 
@@ -17,7 +18,7 @@ namespace PavlovBot.Host.Discord.Commands;
 /// per-rank caps. The roster files are plain text the game reads live and nothing stops a
 /// name appearing in six of them at once, so the boundary is the only enforcement point.
 /// </remarks>
-public sealed class WhitelistCommand(RosterService rosters, FactionMembers members, Access access, Boards boards, ILogger<WhitelistCommand> logger) : ISlashCommand
+public sealed class WhitelistCommand(RosterService rosters, FactionMembers members, Access access, Boards boards, AuditLog audit, ILogger<WhitelistCommand> logger) : ISlashCommand
 {
     public string Name => "whitelist";
 
@@ -168,6 +169,21 @@ public sealed class WhitelistCommand(RosterService rosters, FactionMembers membe
         logger.LogInformation("whitelist add | member={Member} | player=\"{Player}\" | faction={Faction} | by={By} | {Outcome}",
             member.Id, player, faction.Name, command.User.Username, result.Outcome);
 
+        /* AUDITED ONLY WHEN THE ROSTER ACTUALLY CHANGED. A refusal is already answered to the
+           person who ran it, and recording one as a staff action would put "added to NCR" in
+           the log for somebody who was never added.
+
+           THIS WAS MISSING ENTIRELY. Roster changes went to the application log and nowhere
+           else - not the audit store, not the staff channels, not the timeline - even though
+           EventMapping has categorised whitelist-add and whitelist-remove as Faction events
+           all along, waiting for a call that was never written. Who put whom on a roster is
+           exactly the question a log exists to answer. */
+        if (result.Outcome == MembershipOutcome.Allowed)
+        {
+            await audit.RecordAsync("whitelist-add", command.User.Username, player,
+                $"{faction.Name} {result.Rank}".Trim(), ct).ConfigureAwait(false);
+        }
+
         await Reply(command, Describe(result, player, faction)).ConfigureAwait(false);
     }
 
@@ -212,6 +228,12 @@ public sealed class WhitelistCommand(RosterService rosters, FactionMembers membe
 
         logger.LogInformation("whitelist remove | member={Member} | player=\"{Player}\" | faction={Faction} | by={By} | {Outcome}",
             member.Id, recorded.Name, faction.Name, command.User.Username, result.Outcome);
+
+        if (result.Outcome == MembershipOutcome.Allowed)
+        {
+            await audit.RecordAsync("whitelist-remove", command.User.Username, recorded.Name,
+                faction.Name, ct).ConfigureAwait(false);
+        }
 
         await Reply(command, Describe(result, recorded.Name, faction)).ConfigureAwait(false);
     }
@@ -361,21 +383,23 @@ public sealed class RankChangeCommand : ISlashCommand
     private readonly RosterService _rosters;
     private readonly FactionMembers _members;
     private readonly Access _access;
+    private readonly AuditLog _audit;
     private readonly ILogger _logger;
     private readonly int _direction;
 
-    private RankChangeCommand(RosterService rosters, FactionMembers members, Access access, ILogger logger, string name, int direction)
+    private RankChangeCommand(RosterService rosters, FactionMembers members, Access access, AuditLog audit, ILogger logger, string name, int direction)
     {
         _rosters = rosters;
         _members = members;
         _access = access;
+        _audit = audit;
         _logger = logger;
         Name = name;
         _direction = direction;
     }
 
-    public static RankChangeCommand Promotion(RosterService r, FactionMembers m, Access a, ILogger<RankChangeCommand> l) => new(r, m, a, l, "promotion", +1);
-    public static RankChangeCommand Demotion(RosterService r, FactionMembers m, Access a, ILogger<RankChangeCommand> l) => new(r, m, a, l, "demotion", -1);
+    public static RankChangeCommand Promotion(RosterService r, FactionMembers m, Access a, AuditLog d, ILogger<RankChangeCommand> l) => new(r, m, a, d, l, "promotion", +1);
+    public static RankChangeCommand Demotion(RosterService r, FactionMembers m, Access a, AuditLog d, ILogger<RankChangeCommand> l) => new(r, m, a, d, l, "demotion", -1);
 
     public string Name { get; }
 
@@ -449,6 +473,14 @@ public sealed class RankChangeCommand : ISlashCommand
 
         _logger.LogInformation("{Command} | player=\"{Player}\" | faction={Faction} | by={By} | {Outcome} -> {Rank}",
             Name, player, membership.Faction.Name, command.User.Username, decision.Outcome, decision.Rank ?? "-");
+
+        // Same gap, same fix: a rank change is a staff action and was recorded nowhere a
+        // human reads. Name is "promotion" or "demotion", both already mapped as Faction.
+        if (decision.Outcome == MembershipOutcome.Allowed)
+        {
+            await _audit.RecordAsync(Name, command.User.Username, player,
+                $"{membership.Faction.Name} {membership.Rank} -> {decision.Rank}", ct).ConfigureAwait(false);
+        }
 
         var embed = decision.Outcome switch
         {

@@ -2,6 +2,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using PavlovBot.Core.Data;
 using PavlovBot.Host.Configuration;
 using PavlovBot.Host.Discord;
+using PavlovBot.Host.Moderation;
 using PavlovBot.Host.Discord.Commands;
 using PavlovBot.Host.Factions;
 using PavlovBot.Host.Observability;
@@ -44,6 +45,7 @@ public class WhitelistEphemeralTests
             new FactionMembers(store),
             new Access(store, [], []),
             new Boards(store, Rcon(store)),
+            new AuditLog(store),
             NullLogger<WhitelistCommand>.Instance);
     }
 
