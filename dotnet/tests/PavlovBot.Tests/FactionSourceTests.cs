@@ -19,7 +19,38 @@ public class FactionSourceTests
     {
         // Unset is a valid, normal configuration - it means the built-in set - and it must be
         // distinguishable from a path that resolved to nowhere.
-        Assert.Equal("built in (FACTIONS_PATH not set)", PavlovBot.Host.Program.FactionSource(null));
+        Assert.Equal("built in (neither FACTION_SET nor FACTIONS_PATH set)",
+            PavlovBot.Host.Program.FactionSource(null));
+    }
+
+    [Fact]
+    public void ANamedSetIsReportedByName()
+    {
+        // The whole point of the preset is that there is no file to point at, so the line
+        // has to say where the factions came from instead of falling silent.
+        Assert.Contains("fallout", PavlovBot.Host.Program.FactionSource(null, "fallout"),
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void TheFileIsNamedEvenWhenASetNameIsAlsoSet()
+    {
+        /* FACTIONS_PATH wins, so naming the set here would state the opposite of what was
+           loaded - the exact class of lie this line exists to stop. */
+        var file = Path.Combine(Path.GetTempPath(), $"pavlov-factions-{Guid.NewGuid():N}.json");
+        File.WriteAllText(file, "{}");
+
+        try
+        {
+            var described = PavlovBot.Host.Program.FactionSource(file, "fallout");
+
+            Assert.Contains(file, described, StringComparison.Ordinal);
+            Assert.DoesNotContain("fallout", described, StringComparison.Ordinal);
+        }
+        finally
+        {
+            File.Delete(file);
+        }
     }
 
     [Fact]

@@ -151,6 +151,129 @@ public static class FactionRegistry
     /// </remarks>
     public static FactionSet Default { get; } = FactionSet.Of(All.Values);
 
+    /// <summary>
+    /// The Fallout set, built in so a themed server needs no configuration file.
+    /// </summary>
+    /// <remarks>
+    /// SHIPPED RATHER THAN CONFIGURED, and that is the whole point of it. The same ladders
+    /// lived in a JSON file every deployment had to keep by hand: editing it meant SSH, an
+    /// exact path, valid JSON, and a restart - for data that has not changed in months and is
+    /// the same on every server running this theme. A preset is one setting.
+    ///
+    /// THE BUILT-IN DEFAULT IS UNTOUCHED. One binary runs both bots, and the other one has no
+    /// FACTIONS_PATH at all and expects Gambino, Colombo and NYPD. Replacing <see cref="All"/>
+    /// would have swapped the factions out from under it, which is a roster outage rather than
+    /// a rename. This is a second set, chosen by name.
+    ///
+    /// FACTIONS_PATH STILL WINS. Anybody running ladders that are not these keeps their file
+    /// and notices nothing.
+    ///
+    /// The file names match what a live install already has, so switching to this from the
+    /// equivalent JSON file changes nothing on disk - the same rosters, under the same names.
+    /// </remarks>
+    public static readonly FrozenDictionary<string, FactionDefinition> Fallout =
+        new Dictionary<string, FactionDefinition>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["NCR"] = new()
+            {
+                Name = "NCR",
+                Order = ["Recruit", "Trooper", "Corporal", "Sergeant", "Lieutenant", "Captain", "Colonel"],
+                Default = "Recruit",
+                SpawnFile = "ncrspawn.txt",
+                RankFiles = new Dictionary<string, string>
+                {
+                    ["Recruit"] = "ncrrecruit.txt",
+                    ["Trooper"] = "ncrtrooper.txt",
+                    ["Corporal"] = "ncrcorporal.txt",
+                    ["Sergeant"] = "ncrsergeant.txt",
+                    ["Lieutenant"] = "ncrlieutenant.txt",
+                    ["Captain"] = "ncrcaptain.txt",
+                    ["Colonel"] = "ncrcolonel.txt",
+                },
+                /* VETERAN RANGER KEEPS ncrranger.txt. It was called Ranger; renaming a
+                   sub-class must not repoint its file, because the file is what the game
+                   reads and everybody already in it would silently lose the access. */
+                Subclasses = new Dictionary<string, string>
+                {
+                    ["Veteran Ranger"] = "ncrranger.txt",
+                    ["Patrol Ranger"] = "ncrpatrolranger.txt",
+                    ["Heavy Trooper"] = "ncrheavy.txt",
+                },
+            },
+            ["Legion"] = new()
+            {
+                Name = "Legion",
+                Order = ["Recruit", "Prime", "Veteran", "Decanus", "Centurion", "Legate"],
+                Default = "Recruit",
+                SpawnFile = "legionspawn.txt",
+                RankFiles = new Dictionary<string, string>
+                {
+                    ["Recruit"] = "legionrecruit.txt",
+                    ["Prime"] = "legionprime.txt",
+                    ["Veteran"] = "legionveteran.txt",
+                    ["Decanus"] = "legiondecanus.txt",
+                    ["Centurion"] = "legioncenturion.txt",
+                    ["Legate"] = "legionlegate.txt",
+                },
+                Subclasses = new Dictionary<string, string> { ["Frumentarius"] = "legionfrumentarius.txt" },
+            },
+            ["Brotherhood of Steel"] = new()
+            {
+                Name = "Brotherhood of Steel",
+                Order = ["Initiate", "Knight", "Senior Knight", "Paladin", "Sentinel", "Elder"],
+                Default = "Initiate",
+                SpawnFile = "bosspawn.txt",
+                RankFiles = new Dictionary<string, string>
+                {
+                    ["Initiate"] = "bosinitiate.txt",
+                    ["Knight"] = "bosknight.txt",
+                    ["Senior Knight"] = "bosseniorknight.txt",
+                    ["Paladin"] = "bospaladin.txt",
+                    ["Sentinel"] = "bossentinel.txt",
+                    ["Elder"] = "boselder.txt",
+                },
+                Subclasses = new Dictionary<string, string> { ["Scribe"] = "bosscribe.txt" },
+            },
+            ["Enclave"] = new()
+            {
+                Name = "Enclave",
+                Order = ["Recruit", "Soldier", "Sergeant", "Officer", "Colonel"],
+                Default = "Recruit",
+                SpawnFile = "enclavespawn.txt",
+                RankFiles = new Dictionary<string, string>
+                {
+                    ["Recruit"] = "enclaverecruit.txt",
+                    ["Soldier"] = "enclavesoldier.txt",
+                    ["Sergeant"] = "enclavesergeant.txt",
+                    ["Officer"] = "enclaveofficer.txt",
+                    ["Colonel"] = "enclavecolonel.txt",
+                },
+            },
+        }.ToFrozenDictionary(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>The Fallout ladders as a set.</summary>
+    public static FactionSet FalloutSet { get; } = FactionSet.Of(Fallout.Values);
+
+    /// <summary>
+    /// A built-in set by name, or null when the name is not one.
+    /// </summary>
+    /// <remarks>
+    /// Null rather than a fallback, so a typo in the setting is refused at startup instead of
+    /// quietly running the wrong factions - which is a themed server writing the other bot's
+    /// roster files.
+    /// </remarks>
+    public static FactionSet? Preset(string? name) => name?.Trim().ToLowerInvariant() switch
+    {
+        "fallout" => FalloutSet,
+        "default" or "builtin" or "built-in" => Default,
+        _ => null,
+    };
+
+    /// <summary>Every preset name, for the error message when one does not match.</summary>
+    public static IReadOnlyList<string> PresetNames { get; } = ["fallout", "default"];
+
+
+
     public static FactionDefinition? Get(string? faction) =>
         faction is not null && All.TryGetValue(faction, out var def) ? def : null;
 
