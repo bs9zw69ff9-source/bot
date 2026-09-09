@@ -223,6 +223,17 @@ public sealed class WhitelistCommand(RosterService rosters, FactionMembers membe
     /// </remarks>
     private async Task RemoveAsync(SocketSlashCommand command, IUser member, CancellationToken ct)
     {
+        /* Gated up front for the same reason the rank commands are: the per-faction check
+           cannot run until the member is resolved, and resolving them tells the caller
+           whether that person is whitelisted and in which faction. No write happens before
+           it here, but the disclosure did. */
+        if (!access.Allows(RequiredAccess.FactionLeader, command))
+        {
+            await Reply(command, Theme.Denied("Not allowed",
+                access.Refusal(RequiredAccess.FactionLeader, command))).ConfigureAwait(false);
+            return;
+        }
+
         if (members.Of(member.Id) is not { } recorded)
         {
             await Reply(command, Theme.Failure("No membership on record",
@@ -439,6 +450,21 @@ public sealed class RankChangeCommand : ISlashCommand
     public async Task HandleAsync(SocketSlashCommand command, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(command);
+
+        /* GATED BEFORE ANYTHING IS READ OR WRITTEN. The per-faction check further down is
+           the one that decides whether this roster is yours - but it cannot run until the
+           member has been resolved, and resolving them discloses their in-game name and, for
+           a stale entry, DELETES it. Both happened for anybody who could type the command.
+
+           FactionLeader here means "manages at least one faction", so a faction's own role
+           still passes and is then refused by name if the member is not theirs. Somebody who
+           manages nothing gets no further, because no outcome was ever possible for them. */
+        if (!_access.Allows(RequiredAccess.FactionLeader, command))
+        {
+            await Reply(command, Theme.Denied("Not allowed",
+                _access.Refusal(RequiredAccess.FactionLeader, command))).ConfigureAwait(false);
+            return;
+        }
 
         if (command.Data.Options.FirstOrDefault()?.Value is not IUser member)
         {
