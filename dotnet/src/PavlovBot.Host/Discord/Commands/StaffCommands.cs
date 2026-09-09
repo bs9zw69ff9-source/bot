@@ -346,6 +346,21 @@ public sealed class SubclassCommand(
     {
         ArgumentNullException.ThrowIfNull(command);
 
+        /* GATED BEFORE ANYTHING IS READ OR WRITTEN. The per-faction check further down is
+           the one that decides whether this roster is yours - but it cannot run until the
+           member has been resolved, and resolving them discloses their in-game name and, for
+           a stale entry, DELETES it. Both happened for anybody who could type the command.
+
+           FactionLeader here means "manages at least one faction", so a faction's own role
+           still passes and is then refused by name if the member is not theirs. Somebody who
+           manages nothing gets no further, because no outcome was ever possible for them. */
+        if (!access.Allows(RequiredAccess.FactionLeader, command))
+        {
+            await Reply(command, Theme.Denied("Not allowed",
+                access.Refusal(RequiredAccess.FactionLeader, command))).ConfigureAwait(false);
+            return;
+        }
+
         var subclass = command.Data.Options.First(o => o.Name == "subclass").Value as string ?? "";
         var removing = command.Data.Options.FirstOrDefault(o => o.Name == "remove")?.Value as bool? ?? false;
 
