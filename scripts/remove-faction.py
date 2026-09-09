@@ -34,6 +34,7 @@ import os
 import re
 import shutil
 import sys
+import time
 
 
 # dotenv 16's LINE regex, the same one DotEnvConfiguration.cs mirrors. Kept as one
@@ -182,6 +183,60 @@ def strip(text, names):
     return text
 
 
+def roster_files(text, names):
+    """Every roster file the named factions declare, and every file the others keep.
+
+    DERIVED FROM THE CONFIG, NEVER GLOBBED. The roster directory is shared with the other
+    bot, so "delete kings*.txt" is a rule about somebody else's files as much as these. The
+    faction definitions say exactly which files belong to which faction; that list is the
+    only safe one.
+
+    Returns (owned, kept). A file in both is a file two factions share, and it must survive:
+    deleting it would take the access away from the faction that is staying.
+    """
+    wanted = {n.casefold() for n in names}
+    owned, kept = set(), set()
+
+    for start, end, name in _elements(text):
+        block = text[start:end]
+
+        files = set(re.findall(r'"(?:spawnFile|file)"\s*:\s*"([^"]+)"', block))
+        (owned if (name or "").casefold() in wanted else kept).update(files)
+
+    return owned, kept
+
+
+def delete_rosters(directory, files, backup_dir, dry_run):
+    """Remove the named roster files, keeping a copy of anything that had content."""
+    removed, skipped, saved = [], [], 0
+
+    for name in sorted(files):
+        path = os.path.join(directory, name)
+        if not os.path.isfile(path):
+            skipped.append(name)
+            continue
+
+        if dry_run:
+            removed.append(name)
+            continue
+
+        with open(path, encoding="utf-8", errors="replace") as handle:
+            body = handle.read()
+
+        # A BACKUP OF ANYTHING THAT HAD MEMBERS. "Delete outright" is what was asked for and
+        # what happens to the file, but a roster is a list of people and an unlink is the one
+        # step nothing else here can undo.
+        if body.strip():
+            os.makedirs(backup_dir, exist_ok=True)
+            shutil.copyfile(path, os.path.join(backup_dir, name))
+            saved += 1
+
+        os.remove(path)
+        removed.append(name)
+
+    return removed, skipped, saved
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Remove factions from the bot's factions file, by name.",
@@ -190,6 +245,9 @@ def main():
     parser.add_argument("--file", help="the factions JSON file (default: from FACTIONS_PATH)")
     parser.add_argument("--env", default=".env", help="the .env to read FACTIONS_PATH from")
     parser.add_argument("--dry-run", action="store_true", help="say what would change, write nothing")
+    parser.add_argument("--rosters", metavar="DIR",
+                        help="also delete these factions' roster files from DIR "
+                             "(FACTION_ROLES_PATH), backing up any that had members")
     args = parser.parse_args()
 
     names = list(args.factions)
@@ -220,9 +278,32 @@ def main():
         print("nothing changed")
         return 1
 
+    # The file list is read from the ORIGINAL text, because the definitions that name
+    # those files are the ones about to be deleted out of it.
+    doomed = kept = set()
+    if args.rosters:
+        if not os.path.isdir(args.rosters):
+            raise Failure(
+                f"{args.rosters} is not a directory.",
+                "Pass FACTION_ROLES_PATH, the directory holding the roster .txt files.",
+            )
+        owned, kept = roster_files(original, names)
+
+        # A FILE TWO FACTIONS SHARE SURVIVES. Deleting it would take the access away from
+        # the faction that is staying, which is not what removing the other one means.
+        doomed = owned - kept
+        shared = owned & kept
+        for name in sorted(shared):
+            print(f"  keeping {name} - a remaining faction uses it too")
+
     remaining = ", ".join(n for _, _, n in _elements(updated)) or "(none)"
     if args.dry_run:
         print(f"  would leave: {remaining}")
+        if args.rosters:
+            present, _, _ = delete_rosters(args.rosters, doomed, "", dry_run=True)
+            print(f"  would delete {len(present)} roster file(s) from {args.rosters}")
+            for name in present:
+                print(f"    {name}")
         print("dry run - nothing written")
         return 0
 
@@ -232,6 +313,17 @@ def main():
 
     print(f"  now: {remaining}")
     print(f"previous file kept at {path}.bak")
+
+    if args.rosters:
+        backup = os.path.join(args.rosters, "removed-" + time.strftime("%Y%m%d-%H%M%S"))
+        removed, missing, saved = delete_rosters(args.rosters, doomed, backup, dry_run=False)
+
+        print(f"deleted {len(removed)} roster file(s) from {args.rosters}")
+        if saved:
+            print(f"  {saved} had members; copies kept in {backup}")
+        if missing:
+            print(f"  {len(missing)} were already gone: {', '.join(missing)}")
+
     print("restart the bot for it to re-read the file and re-register its commands")
     return 0
 
