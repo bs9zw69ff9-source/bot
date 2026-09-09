@@ -69,9 +69,25 @@ public sealed class RosterService
 
     private readonly Storage.GameFileGuard _guard;
 
+    /// <summary>
+    /// Whether this player keeps every rank at or below their own, by in-game name.
+    /// </summary>
+    /// <remarks>
+    /// A DELEGATE RATHER THAN A PARAMETER ON EVERY WRITE. Three different callers change a
+    /// rank - the two commands and the suspension restore in the background host - and only
+    /// one of them has the member index to read the preference from. Threading it through
+    /// would have meant giving the background host a dependency it has no other use for, and
+    /// a caller that forgot to pass it would silently strip somebody's lower ranks.
+    ///
+    /// Null is the old behaviour exactly: one rank file per member.
+    /// </remarks>
+    private readonly Func<string, bool>? _holdsAllRanks;
+
     public RosterService(string? rosterDirectory, ILogger<RosterService> logger, string? backupDirectory = null,
-        FactionSet? factions = null, Storage.GameFileGuard? guard = null)
+        FactionSet? factions = null, Storage.GameFileGuard? guard = null,
+        Func<string, bool>? holdsAllRanks = null)
     {
+        _holdsAllRanks = holdsAllRanks;
         _guard = guard ?? Storage.GameFileGuard.None;
         Factions = factions ?? FactionRegistry.Default;
         _directory = rosterDirectory;
@@ -460,12 +476,24 @@ public sealed class RosterService
         var decision = MembershipRules.ChangeRank(faction, membership?.Rank, direction);
         if (!decision.IsAllowed) return decision;
 
-        /* Remove from EVERY rank file before adding to the target. Removing only from their
-           current rank leaves a stale entry behind whenever the storage already had them in
-           two, and then a promotion silently gives them two ranks. */
+        /* Remove from EVERY rank file that is not theirs before adding to the target.
+           Removing only from their current rank leaves a stale entry behind whenever the
+           storage already had them in two, and then a promotion silently gives them two
+           ranks.
+
+           WHICH FILES ARE "THEIRS" IS THE ONE THING THAT VARIES. Normally exactly the target
+           rank. For a member set to hold ranks it is the target AND everything below it, so
+           a Sergeant keeps the recruit, trooper and corporal loadouts as well - which is the
+           whole point, since each rank file is what grants its gear in game. A DEMOTION
+           still strips what is now above them, so the set only ever shrinks to match. */
+        var holdsLower = _holdsAllRanks?.Invoke(player) == true;
+        var target = faction.IndexOf(decision.Rank);
+
         foreach (var (rank, file) in faction.RankFiles)
         {
-            if (string.Equals(rank, decision.Rank, StringComparison.OrdinalIgnoreCase)) continue;
+            var index = faction.IndexOf(rank);
+            var keep = holdsLower ? index >= 0 && index <= target : index == target;
+            if (keep) continue;
 
             var roster = Read(file);
             if (roster is null || !roster.Contains(player, StringComparer.OrdinalIgnoreCase)) continue;
@@ -474,7 +502,17 @@ public sealed class RosterService
                 .ConfigureAwait(false);
         }
 
-        await EnsureListedAsync(faction.RankFiles[decision.Rank!], player, ct).ConfigureAwait(false);
+        if (holdsLower)
+        {
+            // Lowest first, so a partially written set finishes in a sensible order if this
+            // is interrupted: they hold the ranks below before they hold the one above.
+            foreach (var rank in faction.Order.Take(target + 1))
+                await EnsureListedAsync(faction.RankFiles[rank], player, ct).ConfigureAwait(false);
+        }
+        else
+        {
+            await EnsureListedAsync(faction.RankFiles[decision.Rank!], player, ct).ConfigureAwait(false);
+        }
 
         /* SELF-HEALING. A promotion should not be able to leave somebody holding a rank they
            cannot spawn into, whether the spawn entry was lost to the port gap this fixes or

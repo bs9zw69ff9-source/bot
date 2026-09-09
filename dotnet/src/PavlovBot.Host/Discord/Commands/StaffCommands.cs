@@ -266,9 +266,20 @@ public sealed class SubclassCommand(
             .WithName("subclass").WithDescription("Which sub-class")
             .WithType(ApplicationCommandOptionType.String).WithRequired(true);
 
-        // Driven off the registry, so adding a sub-class to the data adds it to the picker.
-        foreach (var name in rosters.Factions.All.Values.SelectMany(f => f.Subclasses.Keys).Distinct(StringComparer.Ordinal))
-            subclass.AddChoice(name, name);
+        /* GROUPED BY FACTION, and labelled with it. Driven off the registry, so adding a
+           sub-class to the data adds it to the picker - but the picker was a flat list in
+           registry order, which on a multi-faction server is a wall of names with nothing
+           saying which faction each belongs to. Sorted by faction, then by name.
+
+           THE VALUE STAYS THE BARE NAME, because that is what HasSubclass matches and what
+           the roster files are keyed on. Only the label carries the faction.
+
+           ONE CHOICE PER NAME, still. Two factions can define a sub-class with the same
+           name, and Discord rejects a duplicate choice - which would take EVERY command in
+           the bot off the picker, not just this one. Where that happens both owners go in
+           the one label. */
+        foreach (var (name, owners) in SubclassChoices(rosters.Factions))
+            subclass.AddChoice(Label(owners, name), name);
 
         /* BY DISCORD ACCOUNT, like promotion, demotion and removal. The in-game name is asked
            for exactly once, at /whitelist add, and recorded against the account; every command
@@ -283,6 +294,52 @@ public sealed class SubclassCommand(
             .AddOption(subclass)
             .AddOption("remove", ApplicationCommandOptionType.Boolean, "Remove it instead of assigning", isRequired: false)
             .Build();
+    }
+
+    /// <summary>Every sub-class, once each, with the faction(s) that define it.</summary>
+    /// <remarks>
+    /// Ordered by the first owning faction and then by name, so the picker reads as one
+    /// faction's sub-classes followed by the next rather than as registry order - which is
+    /// insertion order and means nothing to whoever is looking at the list.
+    /// </remarks>
+    internal static IReadOnlyList<(string Name, IReadOnlyList<string> Owners)> SubclassChoices(FactionSet factions)
+    {
+        ArgumentNullException.ThrowIfNull(factions);
+
+        var owners = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+        var order = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        var position = 0;
+
+        foreach (var faction in factions.All.Values)
+        {
+            foreach (var subclass in faction.Subclasses.Keys)
+            {
+                if (!owners.TryGetValue(subclass, out var list))
+                {
+                    owners[subclass] = list = [];
+                    order[subclass] = position;
+                }
+                if (!list.Contains(faction.Name, StringComparer.OrdinalIgnoreCase)) list.Add(faction.Name);
+            }
+            position++;
+        }
+
+        return [.. owners
+            .OrderBy(e => order[e.Key])
+            .ThenBy(e => e.Key, StringComparer.OrdinalIgnoreCase)
+            .Select(e => (e.Key, (IReadOnlyList<string>)e.Value))];
+    }
+
+    /// <summary>"NCR - Veteran Ranger", or the bare name if that would not fit.</summary>
+    /// <remarks>
+    /// Discord caps a choice label at 100 characters and REJECTS the whole registration over
+    /// one that is too long - which takes every command off the picker, so the prefix is
+    /// dropped rather than truncated when it does not fit.
+    /// </remarks>
+    private static string Label(IReadOnlyList<string> owners, string name)
+    {
+        var label = $"{string.Join("/", owners)} - {name}";
+        return label.Length <= 100 ? label : name;
     }
 
     public async Task HandleAsync(SocketSlashCommand command, CancellationToken ct)

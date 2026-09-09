@@ -350,7 +350,12 @@ public static class Program
            summary prints the faction names for exactly that reason. */
         builder.Services.AddSingleton(sp => new RosterService(
             features.RosterDirectory, sp.GetRequiredService<ILogger<RosterService>>(),
-            backupDirectory: null, factions: factions, guard: sp.GetRequiredService<GameFileGuard>()));
+            backupDirectory: null, factions: factions, guard: sp.GetRequiredService<GameFileGuard>(),
+            /* Resolved on each call rather than captured, so a preference changed by
+               /whitelist add takes effect on the very next promotion. The index only needs
+               SerializedStore, so there is no cycle back to this. */
+            holdsAllRanks: name => sp.GetRequiredService<PavlovBot.Host.Factions.FactionMembers>()
+                .HoldsAllRanks(name)));
 
         builder.Services.AddSingleton<CommandCatalog>();
         builder.Services.AddSingleton<PlayerAutocomplete>();

@@ -39,8 +39,12 @@
       ],
       // Sub-classes are NOT ranks. A member keeps their rank and may hold one
       // of these as well, each with its own whitelist file.
+      // RENAMING A SUB-CLASS DOES NOT RENAME ITS FILE, and must not: the file is what
+      // the game reads, so pointing "Veteran Ranger" at a new file would silently take
+      // the access away from everybody already in ncrranger.txt.
       "subclasses": [
-        { "name": "Ranger",         "file": "ncrranger.txt" },
+        { "name": "Veteran Ranger", "file": "ncrranger.txt" },
+        { "name": "Patrol Ranger",  "file": "ncrpatrolranger.txt" },
         { "name": "Heavy Trooper",  "file": "ncrheavy.txt" }
       ]
     },
