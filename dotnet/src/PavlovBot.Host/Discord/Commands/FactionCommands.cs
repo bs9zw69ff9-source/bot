@@ -74,7 +74,10 @@ public sealed class WhitelistCommand(RosterService rosters, FactionMembers membe
             .AddOption(new SlashCommandOptionBuilder()
                 .WithName("add").WithDescription("Whitelist Leader - Add a member to a faction")
                 .WithType(ApplicationCommandOptionType.SubCommand)
-                .AddOption(Faction()).AddOption(Member()).AddOption(InGameName()))
+                .AddOption(Faction()).AddOption(Member()).AddOption(InGameName())
+                .AddOption("hold_ranks", ApplicationCommandOptionType.Boolean,
+                    "Keep every rank at or below theirs on promotion, not just the one they hold",
+                    isRequired: false))
             .AddOption(new SlashCommandOptionBuilder()
                 .WithName("remove").WithDescription("Whitelist Leader - Remove a member from their faction")
                 .WithType(ApplicationCommandOptionType.SubCommand)
@@ -161,10 +164,25 @@ public sealed class WhitelistCommand(RosterService rosters, FactionMembers membe
         /* THE INDEX FOLLOWS THE FILE. Recorded only once the roster write succeeded, so a
            failed add does not leave a membership on record that the game has never heard of -
            /promotion would then act on somebody who is not whitelisted. */
-        if (result.Outcome == MembershipOutcome.Allowed)
+        var holdRanks = options.GetValueOrDefault("hold_ranks") as bool? ?? false;
+
+        /* RECORDED ON A NO-CHANGE TOO, which is what makes the flag settable at all. Re-running
+           add for somebody already whitelisted answers NoChange and writes no roster file - but
+           the preference is not roster state, and refusing to update it would leave no way to
+           turn this on for an existing member short of removing and re-adding them. */
+        if (result.Outcome is MembershipOutcome.Allowed or MembershipOutcome.NoChange)
+        {
+            var existing = members.Of(member.Id);
             await members.RememberAsync(member.Id,
-                new FactionMember(faction.Name, player, DateTimeOffset.UtcNow, command.User.Username), ct)
-                .ConfigureAwait(false);
+                new FactionMember(
+                    faction.Name,
+                    result.Outcome == MembershipOutcome.Allowed ? player : existing?.Name ?? player,
+                    existing?.At ?? DateTimeOffset.UtcNow,
+                    existing?.By ?? command.User.Username)
+                {
+                    HoldsAllRanks = holdRanks,
+                }, ct).ConfigureAwait(false);
+        }
 
         logger.LogInformation("whitelist add | member={Member} | player=\"{Player}\" | faction={Faction} | by={By} | {Outcome}",
             member.Id, player, faction.Name, command.User.Username, result.Outcome);
@@ -184,7 +202,15 @@ public sealed class WhitelistCommand(RosterService rosters, FactionMembers membe
                 $"{faction.Name} {result.Rank}".Trim(), ct).ConfigureAwait(false);
         }
 
-        await Reply(command, Describe(result, player, faction)).ConfigureAwait(false);
+        var reply = Describe(result, player, faction);
+        if (holdRanks && result.Outcome is MembershipOutcome.Allowed or MembershipOutcome.NoChange)
+        {
+            reply.AddField("Holds every rank",
+                "On promotion they keep the ranks below as well, so they hold every loadout up " +
+                "to their own. A demotion still takes back whatever is above them.");
+        }
+
+        await Reply(command, reply).ConfigureAwait(false);
     }
 
     /// <summary>

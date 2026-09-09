@@ -7,7 +7,27 @@ namespace PavlovBot.Host.Factions;
 /// <param name="Name">The in-game name written to the roster file.</param>
 /// <param name="At">When they were added.</param>
 /// <param name="By">Who added them, for the audit trail.</param>
-public sealed record FactionMember(string Faction, string Name, DateTimeOffset At, string By);
+public sealed record FactionMember(string Faction, string Name, DateTimeOffset At, string By)
+{
+    /// <summary>
+    /// Keep every rank at or below theirs, instead of only the one they hold.
+    /// </summary>
+    /// <remarks>
+    /// A PREFERENCE, AND THE ONLY ONE STORED HERE. Everything else on this record is index
+    /// data; this changes what a promotion WRITES. It lives here because it cannot be derived
+    /// from the files: a member at the entry rank is in exactly one rank file whether they
+    /// hold ranks cumulatively or not, so there is nothing to read the intent off until the
+    /// first promotion has already happened and chosen for them.
+    ///
+    /// THE FILES ARE STILL THE SOURCE OF TRUTH. This decides what the next write does; it
+    /// never contradicts what is on disk, and a member hand-added to three rank files reads
+    /// as their top rank either way.
+    ///
+    /// Absent on every record written before this existed, which deserialises as false - the
+    /// behaviour those members already had.
+    /// </remarks>
+    public bool HoldsAllRanks { get; init; }
+}
 
 /// <summary>
 /// Which Discord account owns which in-game name in which faction.
@@ -55,6 +75,17 @@ public sealed class FactionMembers(SerializedStore store)
     /// For the path that starts from a roster file rather than from a command - showing who a
     /// listed name belongs to. Names are compared the way the rest of the bot compares them.
     /// </remarks>
+    /// <summary>
+    /// Whether this in-game name is set to hold every rank at or below their own.
+    /// </summary>
+    /// <remarks>
+    /// BY NAME, because the roster writer works in names and has no Discord id to hand. The
+    /// index is keyed the other way, so this is the reverse lookup - the same one OwnerOf
+    /// does, and cheap for the same reason: a handful of entries per faction.
+    /// </remarks>
+    public bool HoldsAllRanks(string? name) =>
+        name is { Length: > 0 } && OwnerOf(name) is { } id && Of(id)?.HoldsAllRanks == true;
+
     public ulong? OwnerOf(string name) =>
         Load().FirstOrDefault(kv => string.Equals(kv.Value.Name, name, StringComparison.OrdinalIgnoreCase))
             is { Key: { } key } && ulong.TryParse(key, out var id) ? id : null;

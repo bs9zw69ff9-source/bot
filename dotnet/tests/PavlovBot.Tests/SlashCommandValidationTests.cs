@@ -126,10 +126,16 @@ public class SlashCommandValidationTests
         Assert.Equal(ApplicationCommandOptionType.User, member.Type);
         Assert.DoesNotContain(options, o => o.Name == "playerid");
 
-        // The sub-class picker is generated from the registry, so a new sub-class reaches
-        // the command without anybody editing it. Narcotics Bureau is the proof.
+        /* The sub-class picker is generated from the registry, so a new sub-class reaches
+           the command without anybody editing it. Narcotics Bureau is the proof.
+
+           ASSERTED ON THE VALUE, which is the bare name - that is what HasSubclass matches
+           and what the roster files are keyed on. The LABEL carries the owning faction, so
+           it reads "NYPD - Narcotics Bureau" in the picker; asserting on that alone would
+           pass while the value silently changed to something no roster knows. */
         var choices = Assert.Single(options, o => o.Name == "subclass").Choices;
-        Assert.Contains("Narcotics Bureau", choices!.Select(c => c.Name), StringComparer.Ordinal);
+        Assert.Contains("Narcotics Bureau", choices!.Select(c => c.Value?.ToString()), StringComparer.Ordinal);
+        Assert.Contains("NYPD - Narcotics Bureau", choices!.Select(c => c.Name), StringComparer.Ordinal);
     }
 
     // ---- the validator ----
