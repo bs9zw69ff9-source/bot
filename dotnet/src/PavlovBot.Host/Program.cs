@@ -106,6 +106,28 @@ public static class Program
            UNSET IS THE BUILT-IN SET. The normal bots configure nothing and get exactly what
            they have today; only a themed clone points this at a file. */
         var factions = PavlovBot.Core.Factions.FactionRegistry.Default;
+
+        /* A NAMED SET, CHECKED BEFORE THE FILE and overridden by it. Keeping a JSON file by
+           hand - SSH, an exact path, valid JSON, a restart - for ladders that do not change is
+           the hassle this removes; FACTIONS_PATH is still there for ladders that are genuinely
+           somebody's own.
+
+           A NAME THAT IS NOT A SET IS FATAL, not a fallback. Quietly running the built-in
+           factions because FACTION_SET said "falout" is a themed bot writing the other bot's
+           roster files, which is a roster outage rather than a typo. */
+        if (features.FactionSetName is { Length: > 0 } setName)
+        {
+            if (PavlovBot.Core.Factions.FactionRegistry.Preset(setName) is not { } preset)
+            {
+                await Console.Error.WriteLineAsync(
+                    $"FACTION_SET is \"{setName}\", which is not a built-in set. " +
+                    $"Use one of: {string.Join(", ", PavlovBot.Core.Factions.FactionRegistry.PresetNames)} " +
+                    "- or set FACTIONS_PATH instead to load your own from a file.").ConfigureAwait(false);
+                return 78;   // EX_CONFIG
+            }
+            factions = preset;
+        }
+
         if (features.FactionsPath is { } factionsPath)
         {
             var loaded = PavlovBot.Host.Factions.FactionsFile.Load(factionsPath);
@@ -588,7 +610,7 @@ public static class Program
            built-in factions and writing the other bot's files. Printing the names is the
            check that takes one glance; nothing else would say which set is loaded. */
         logger.LogInformation("  factions: {Count} from {Source} - {Names}",
-            factions.Names.Count, FactionSource(features.FactionsPath),
+            factions.Names.Count, FactionSource(features.FactionsPath, features.FactionSetName),
             string.Join(", ", factions.Names));
         logger.LogInformation("  whitelist bot: {State}", options.FactionBotEnabled
             ? $"on (application {options.FactionClientId}, owns /whitelist /promotion /demotion /subclass)"
@@ -969,9 +991,15 @@ public static class Program
     /// built from, so a set here that disagrees with what Discord shows is Discord's cache,
     /// not this file.
     /// </remarks>
-    internal static string FactionSource(string? path)
+    internal static string FactionSource(string? path, string? setName = null)
     {
-        if (path is null) return "built in (FACTIONS_PATH not set)";
+        // The file wins when both are set, so it is named first or the line would lie.
+        if (path is null)
+        {
+            return setName is { Length: > 0 }
+                ? $"the built-in \"{setName}\" set (no FACTIONS_PATH)"
+                : "built in (neither FACTION_SET nor FACTIONS_PATH set)";
+        }
 
         try
         {

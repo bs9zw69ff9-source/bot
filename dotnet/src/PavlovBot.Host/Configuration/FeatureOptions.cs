@@ -161,6 +161,17 @@ public sealed record FeatureOptions
     public string? FactionsPath { get; init; }
 
     /// <summary>
+    /// A built-in faction set by name, used when no <see cref="FactionsPath"/> is given.
+    /// </summary>
+    /// <remarks>
+    /// THE FILE WAS THE HASSLE. Running a themed server meant keeping a JSON file by hand -
+    /// SSH, an exact path, valid JSON, a restart - for ladders that do not change and are the
+    /// same on every server running that theme. This is the same data, shipped, chosen by one
+    /// word. FACTIONS_PATH still wins for anybody whose ladders are genuinely their own.
+    /// </remarks>
+    public string? FactionSetName { get; init; }
+
+    /// <summary>
     /// Paths this bot must never WRITE to, however else it is configured.
     /// </summary>
     /// <remarks>
@@ -282,6 +293,7 @@ public sealed record FeatureOptions
             PavlovVersion = Text(configuration, "PAVLOV_VERSION"),
             RosterDirectory = Text(configuration, "FACTION_ROLES_PATH"),
             FactionsPath = Text(configuration, "FACTIONS_PATH"),
+            FactionSetName = Text(configuration, "FACTION_SET"),
             IgnoredPaths = List(configuration, "IGNORE_PATHS"),
             PavlovUnits = PavlovBot.Host.Servers.ServiceControl.ParseUnits(Text(configuration, "PAVLOV_UNITS")),
             SystemctlSudo = OptionalFlag(configuration, "PAVLOV_SYSTEMCTL_SUDO"),
