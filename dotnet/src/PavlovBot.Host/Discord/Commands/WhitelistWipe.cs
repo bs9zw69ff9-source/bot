@@ -134,9 +134,9 @@ public sealed class WhitelistWipe(
         /* NAMED, not counted. "Some files failed" sends somebody to check all of them; the
            list says which rosters still hold members and therefore who can still play. */
         _ => Theme.Warning("Partly wiped",
-            $"**{result.Removed}** member(s) were cleared, but these files could not be written and " +
-            $"still hold members: {string.Join(", ", result.Failed.Select(f => $"`{Sanitize.Code(f)}`"))}.\n\n" +
-            "Check the bot's log for the reason, then run the wipe again."),
+            $"**{result.Removed}** cleared. These files could not be written and still hold members: " +
+            $"{string.Join(", ", result.Failed.Select(f => $"`{Sanitize.Code(f)}`"))}.\n\n" +
+            "The log has the reason. Run the wipe again after fixing it."),
     };
 
     /// <summary>Replace the prompt with its outcome and take the buttons away.</summary>

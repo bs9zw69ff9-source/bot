@@ -205,13 +205,11 @@ public sealed class WagesCommand(Payroll payroll) : ISlashCommand
 
         /* SAYING WHY, not just how much. "Unbanked" reads like money that has gone missing
            unless it comes with the reason it is being held. */
-        embed.AddField("How this works",
-            $"On duty pays **{Money(payroll.Amount)}** per **{payroll.Period.TotalMinutes:0}** minutes " +
-            "of observed time. Part periods are not rounded up or thrown away — they carry " +
-            "forward and pay out once they complete.\n\n" +
-            "Earned pay is banked to the in-game balance on the first check **after they log " +
-            "off**. It cannot be written while they are connected: the server holds that " +
-            "balance in memory and overwrites the file from it.");
+        embed.AddField("How pay works",
+            $"**{Money(payroll.Amount)}** per **{payroll.Period.TotalMinutes:0}** minutes on duty. " +
+            "Part periods carry forward rather than rounding.\n\n" +
+            "It banks to the in-game balance once they log off — while they are connected the " +
+            "server overwrites that file from memory.");
 
         await Reply(command, embed).ConfigureAwait(false);
     }

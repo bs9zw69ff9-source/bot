@@ -41,10 +41,9 @@ public sealed class MenuPanel(
     public Embed BuildPanel() =>
         Theme.Success("RCON menu access",
                 "Tools for trusted staff.\n\n" +
-                "Press **Get menu** and enter your **exact** Pavlov in-game name. " +
-                "The bot grants the menu matching your highest staff role — no admin needed.\n\n" +
-                "One in-game name per Discord account, permanently. Enter **your own name again** " +
-                "at any time to remove your menu and redo it.")
+                "Press **Get menu** and enter your **exact** Pavlov in-game name. You get the " +
+                "menu matching your highest staff role.\n\n" +
+                "One name per Discord account. Enter it again to remove your menu.")
             .Brand()
             .Build();
 

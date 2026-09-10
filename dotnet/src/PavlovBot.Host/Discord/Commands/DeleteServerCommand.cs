@@ -141,10 +141,9 @@ public sealed class DeleteServerCommand(
 
         if (slot != count)
         {
-            return $"only the highest-numbered server can be deleted, which is server {count}. Servers are positional " +
-                   $"as well as indexed - the unit for server N is the Nth entry of PAVLOV_UNITS - so removing server " +
-                   $"{slot} would leave a gap that silently re-points the remaining units at the wrong servers.\n" +
-                   $"Delete from the top down if you want it gone: server {count} first.";
+            return $"only server {count} can be deleted. Servers are positional - the unit for server N is the Nth " +
+                   $"entry of PAVLOV_UNITS - so removing server {slot} would re-point the rest at the wrong servers.\n" +
+                   $"Delete from the top down: server {count} first.";
         }
 
         if (units.Count != count || bases.Count != count)

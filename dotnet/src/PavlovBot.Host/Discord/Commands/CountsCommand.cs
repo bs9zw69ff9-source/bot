@@ -63,9 +63,8 @@ public sealed class CountsCommand(PlayerCountChannels counts, FeatureOptions fea
         if (failed > 0)
         {
             embed.AddField("Most likely",
-                "**needs Manage Channels** — the bot must have that permission *on each voice channel*. " +
-                "A bot invited for messaging alone does not have it, and this is the usual answer.\n" +
-                "**not visible** — the id is wrong, or the bot cannot see that channel.");
+                "**needs Manage Channels** — *on each voice channel*, not just the server. Usually this one.\n" +
+                "**not visible** — wrong id, or the bot cannot see that channel.");
         }
 
         /* HALF-CONFIGURED IS THE CASE THIS MISSES. The guard above only fires when BOTH
@@ -77,8 +76,8 @@ public sealed class CountsCommand(PlayerCountChannels counts, FeatureOptions fea
         if (MissingHalf(targets) is { } missing) embed.AddField(missing.Title, missing.Body);
 
         embed.AddField("Note",
-            "The timer runs this every 5 minutes. Discord allows two renames per 10 minutes " +
-            "*per channel*, so running this by hand spends part of that allowance.");
+            "The timer already does this every 5 minutes. Discord allows two renames per 10 " +
+            "minutes *per channel*, and running it by hand spends one.");
 
         await Reply(command, embed).ConfigureAwait(false);
     }
@@ -106,10 +105,10 @@ public sealed class CountsCommand(PlayerCountChannels counts, FeatureOptions fea
         if (targets.ServerChannels.Count == 0)
         {
             return ("Per-server channels are not configured",
-                "`PLAYER_COUNT_CHANNELS` is empty, so nothing above reports a per-server count - " +
-                "including when a server is down. Only the platform total is being updated.\n\n" +
-                "Set it to one voice channel id per server, **in server order** so the first id is " +
-                "the server behind `RCON_HOST_1`, then restart:\n" +
+                "`PLAYER_COUNT_CHANNELS` is empty, so only the platform total updates - nothing " +
+                "shows a per-server count, including when one is down.\n\n" +
+                "Set one voice channel id per server, **in server order** (first id is the server " +
+                "behind `RCON_HOST_1`), then restart:\n" +
                 "```\nPLAYER_COUNT_CHANNELS=111,222,333\n```");
         }
 

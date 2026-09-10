@@ -187,7 +187,7 @@ public class AccessTests
 
         var refusal = access.ExplainRefusal(new FakeUser(StrangerId), RequiredAccess.Mod);
 
-        Assert.Contains("could not read your server roles", refusal, StringComparison.Ordinal);
+        Assert.Contains("could not read your roles", refusal, StringComparison.Ordinal);
     }
 
     [Fact]

@@ -89,10 +89,8 @@ public sealed class OwnerActions(
         return lines.Count == 0
             ? OwnerActionResult.Done(
                 "Nothing is blacklisted.\n\n" +
-                "This list is only what an owner blacklisted by hand. It is NOT the only thing " +
-                "that can ban somebody: VPN screening bans on its own verdict, and the game keeps " +
-                "its own ban list. Run `/checkban <name>` to see which one did it - an automatic " +
-                "ban shows `auto` as the moderator.")
+                "This is only what an owner blacklisted by hand. VPN screening and the game's own " +
+                "ban list are separate - `/checkban <name>` says which one caught somebody.")
             : OwnerActionResult.List($"**{lines.Count}** blacklist entr(ies).", lines);
     }
 

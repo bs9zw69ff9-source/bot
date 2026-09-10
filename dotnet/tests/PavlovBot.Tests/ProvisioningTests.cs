@@ -909,15 +909,14 @@ public class ProvisioningTests
 
         var middle = DeleteServerCommand.Problem(2, [1, 2, 3], units, bases);
         Assert.NotNull(middle);
-        Assert.Contains("highest-numbered", middle, StringComparison.Ordinal);
+        Assert.Contains("only server 3 can be deleted", middle, StringComparison.Ordinal);
 
         /* SERVER 1 REACHES THE EXPLANATION rather than being refused by Discord. The option's
            range used to start at 2, which enforced this a layer too early: Discord rejected the
            value with its own "Enter a number between 2 and 9" and the actual reason never ran. */
         var first = DeleteServerCommand.Problem(1, [1, 2, 3], units, bases);
         Assert.NotNull(first);
-        Assert.Contains("highest-numbered", first, StringComparison.Ordinal);
-        Assert.Contains("server 3", first, StringComparison.Ordinal);
+        Assert.Contains("only server 3 can be deleted", first, StringComparison.Ordinal);
     }
 
     [Fact]

@@ -114,8 +114,8 @@ public sealed class ArrestBooking(ILogger<ArrestBooking> logger) : IComponentHan
         var who = booking.Player.Length == 0 ? "no player chosen" : Sanitize.Code(booking.Player);
 
         return Theme.Warning($"Booking: {who}",
-                "Pick the player, then a section, then the charge(s). Add as many as needed, then confirm.\n" +
-                "**Set time** overrides the sentence; bail still stacks from the charges.\n\n" +
+                "Pick the player, then a section, then the charges. Confirm when done.\n" +
+                "**Set time** overrides the sentence; bail still stacks.\n\n" +
                 $"{sentence}{note}\n{lines}")
             .Brand()
             .Build();

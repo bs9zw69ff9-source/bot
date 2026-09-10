@@ -294,10 +294,9 @@ public sealed class ProvisionServerCommand(
             $"||`{steamUserPassword}`||", inline: false);
 
         embed.AddField($"{Theme.Warn} steam is getting FULL sudo",
-            "Every provision installs `/etc/sudoers.d/pavlov-steam-full`, giving the `steam` account " +
-            "unrestricted, passwordless root. This was requested explicitly and is not this bot's usual " +
-            "narrow, per-unit grant - a compromise of the game server or a bad workshop map is a root " +
-            "compromise from here on. Remove that file if you did not mean for that to apply here.", inline: false);
+            "`/etc/sudoers.d/pavlov-steam-full` gives the `steam` account passwordless root. " +
+            "From here on, a compromised game server or a bad workshop map is a root compromise. " +
+            "Delete that file if you did not want that.", inline: false);
 
         return embed.Build();
     }

@@ -288,10 +288,9 @@ public sealed class Access
                tiers still work in this state because they are id-based, which is exactly
                the confusing part. */
             lines.Add(
-                "The bot could not read your server roles for this interaction, so only " +
-                "owner access - which is by user id - could be checked. Outside the server " +
-                "your roles are read from the staff guild; if you are not in it, or the bot " +
-                "has not been told which guild that is, there is nothing to read.");
+                "The bot could not read your roles here, so only owner access - which goes by " +
+                "user id - was checked. Outside the server your roles come from the staff guild; " +
+                "if you are not in it, there is nothing to read.");
         }
         else if (required is RequiredAccess.Mod && Roles.ModRole is null)
         {

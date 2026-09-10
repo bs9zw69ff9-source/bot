@@ -76,9 +76,8 @@ public sealed class ServerStatsCommand(AnalyticsService analytics, IEventStore e
         if (events.Count() == 0)
         {
             await Reply(command, Theme.Notice("No timeline data yet",
-                "Nothing has been recorded. The timeline starts collecting when the bot does, " +
-                "so a fresh deploy has nothing to report until players connect.\n\n" +
-                "If this persists, check `EVENT_RETENTION_DAYS` is not 0.")).ConfigureAwait(false);
+                "Nothing recorded yet. A fresh deploy has nothing until players connect.\n\n" +
+                "If this sticks around, check `EVENT_RETENTION_DAYS` is not 0.")).ConfigureAwait(false);
             return;
         }
 
@@ -111,17 +110,13 @@ public sealed class ServerStatsCommand(AnalyticsService analytics, IEventStore e
         }
 
         /* NAMED, NOT OMITTED. A panel that silently lacks session counts invites the reader to
-           assume they are zero or that nobody thought of it. Neither is true: the data to
-           compute them does not exist yet, and saying which data is the only way somebody can
-           decide whether to go and collect it. */
-        embed.AddField("Not shown, and why",
-            "**Sessions and session length** need a leave event; the log tracker raises joins " +
-            "and address confirmations only, so a session has a start and no end.\n" +
-            "**Average concurrent players** needs a sampled count over time, which is a gauge " +
-            "rather than an event stream.\n" +
-            "**Retention** needs first-seen per player joined against these events.\n" +
-            "None are estimated here - a made-up number in an analytics panel cannot be told " +
-            "apart from a real one.");
+           assume they are zero or that nobody thought of it - the data does not exist yet, and
+           saying which data is what lets somebody decide to go and collect it. */
+        embed.AddField("Not shown",
+            "**Sessions** and **session length** — nothing records a leave.\n" +
+            "**Average concurrent** — needs sampling, not events.\n" +
+            "**Retention** — needs first-seen per player.\n\n" +
+            "None of them are estimated.");
 
         await Reply(command, embed).ConfigureAwait(false);
     }
@@ -196,8 +191,7 @@ public sealed class StaffStatsCommand(AnalyticsService analytics, Access access)
             string.Join("\n", rows.Take(20).Select((row, i) =>
                 $"`{i + 1,2}.` **{Sanitize.Code(row.Moderator)}** — {row.Actions:N0} action(s)")))
             .AddField("Reading this",
-                "A high count is somebody doing the work. Nothing here is a ranking of quality, " +
-                "and automated actions are excluded so the responders do not top the list.");
+                "A count of work done, not a ranking of quality. Automated actions are excluded.");
     }
 
     private EmbedBuilder Member(string moderator, string label, TimeSpan window)
@@ -226,9 +220,7 @@ public sealed class StaffStatsCommand(AnalyticsService analytics, Access access)
                about doing their job quickly. */
             embed.AddField($"{Theme.Warn} Worth a glance",
                 $"{anomaly.Explanation}\n\n" +
-                "That is a burst against their own usual rate, which a busy evening or a raid " +
-                "explains just as well as anything else. **This is not a disciplinary finding** " +
-                "and nothing has been done about it.");
+                "A busy evening or a raid looks the same. Nothing has been done about it.");
         }
 
         return embed;

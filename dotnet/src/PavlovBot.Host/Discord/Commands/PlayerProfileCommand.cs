@@ -106,8 +106,8 @@ public sealed class PlayerProfileCommand(PlayerIntelligenceService intelligence,
             /* SAID PLAINLY. An empty profile and a clean one look identical, and the
                difference matters: "never seen" is not "no record of wrongdoing". */
             await Reply(command, Theme.Notice($"Never seen: {Sanitize.Code(player)}",
-                "The bot has no record of this player at all - no sessions, no bans, no warnings. " +
-                "Check the spelling; in-game names are case-sensitive and easy to mistype.")).ConfigureAwait(false);
+                "No record of this player at all - no sessions, no bans, no warnings. " +
+            "Check the spelling; in-game names are case-sensitive.")).ConfigureAwait(false);
             return;
         }
 
@@ -191,9 +191,7 @@ public sealed class PlayerProfileCommand(PlayerIntelligenceService intelligence,
         /* SAID EVERY TIME, not just when the score is high. The one thing a moderator must
            never assume is that the bot has already acted. */
         embed.AddField($"{Theme.Warn} No action was taken",
-            "This is an assessment, not a punishment. Signals combine so that weak ones cannot " +
-            "add up to a strong verdict, but a high score is still a reason to look rather than " +
-            "a reason to ban.");
+            "An assessment, not a punishment. A high score is a reason to look, not a reason to ban.");
 
         return Footnote(embed, p);
     }
@@ -264,9 +262,8 @@ public sealed class PlayerProfileCommand(PlayerIntelligenceService intelligence,
            as proof of alt accounts, and every link on it has an innocent explanation that is
            more common than the guilty one. */
         embed.AddField("What this means",
-            "A link is a CONFIRMED SHARED ADDRESS and nothing more. Households, phone " +
-            "tethering, student halls and recycled ISP leases all put unrelated people on one " +
-            "address. Treat it as a question, not an answer.");
+            "A shared address and nothing more. Households, tethering, student halls and recycled " +
+            "ISP leases all put strangers on one address. A question, not an answer.");
 
         return Footnote(embed, p);
     }

@@ -27,24 +27,21 @@ internal static class MembershipReply
         {
             MembershipOutcome.RosterUnavailable => Theme.Failure(
                 "The roster files are unreachable",
-                "Nothing was changed. The bot could not read or reach the faction roster " +
-                "directory, so it has no file to write.\n\n" +
-                "Check `FACTION_ROLES_PATH` on the process running this command - it must " +
-                "point at the directory holding the faction `.txt` files, and that directory " +
-                "must already exist. If the whitelist commands run in a second bot process, " +
-                "it needs the setting too."),
+                "Nothing was changed — the bot cannot reach the roster directory.\n\n" +
+                "Check `FACTION_ROLES_PATH` on the process running this command. It has to " +
+                "point at the folder holding the faction `.txt` files, and that folder has to " +
+                "exist already."),
 
             MembershipOutcome.WriteFailed => Theme.Failure(
                 "The roster could not be written",
-                "Nothing was changed. The files were readable but the write did not go " +
-                "through - a permissions problem, a full disk, or the write guard refusing a " +
-                "change that would have removed most of the roster. The bot's log has the " +
-                "reason."),
+                "Nothing was changed. The files read fine but the write failed — permissions, " +
+                "a full disk, or the guard blocking a change that would have emptied the " +
+                "roster. The log has the reason."),
 
             MembershipOutcome.UnknownFaction => Theme.Failure(
                 "No such faction",
-                "That faction is not in the registry. If it used to exist it has been removed, " +
-                "and any member recorded against it needs re-adding to a current one."),
+                "That faction is not in the registry. Anyone recorded against it needs " +
+                "re-adding to a current one."),
 
             /* Last resort, and it still names the code. An outcome reaching here is one a
                command forgot to describe, and the enum name is what makes that findable. */

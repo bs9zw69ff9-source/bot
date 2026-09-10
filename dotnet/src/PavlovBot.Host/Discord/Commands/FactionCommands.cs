@@ -206,8 +206,8 @@ public sealed class WhitelistCommand(RosterService rosters, FactionMembers membe
         if (holdRanks && result.Outcome is MembershipOutcome.Allowed or MembershipOutcome.NoChange)
         {
             reply.AddField("Holds every rank",
-                "On promotion they keep the ranks below as well, so they hold every loadout up " +
-                "to their own. A demotion still takes back whatever is above them.");
+                "They keep the ranks below too, so they hold every loadout up to their own. " +
+            "A demotion still takes back anything above.");
         }
 
         await Reply(command, reply).ConfigureAwait(false);
@@ -237,9 +237,9 @@ public sealed class WhitelistCommand(RosterService rosters, FactionMembers membe
         if (members.Of(member.Id) is not { } recorded)
         {
             await Reply(command, Theme.Failure("No membership on record",
-                $"{member.Mention} has no faction recorded against their account. They may still be " +
-                "whitelisted in game under a name the bot does not know - re-add them with " +
-                "`/whitelist add` to link the two, then remove.")).ConfigureAwait(false);
+                $"{member.Mention} has no faction on record. They may still be whitelisted in game " +
+                "under a name the bot does not know — `/whitelist add` links the two, then " +
+                "remove.")).ConfigureAwait(false);
             return;
         }
 
@@ -314,10 +314,9 @@ public sealed class WhitelistCommand(RosterService rosters, FactionMembers membe
         }
 
         var embed = Theme.Denied($"Wipe the {faction.Name} whitelist?",
-            $"This clears **{roster.Count}** member(s) from every **{faction.Name}** roster file, " +
-            "including the spawn file. They lose faction access in game as soon as it is written.\n\n" +
-            "A copy of each file is kept in the backup directory, so this is recoverable by hand " +
-            "on the server - but not from Discord.");
+            $"Clears **{roster.Count}** member(s) from every **{faction.Name}** roster file, spawn " +
+            "file included. They lose access in game as soon as it is written.\n\n" +
+            "Backups are kept on the server, so it is recoverable by hand — not from Discord.");
 
         await command.ModifyOriginalResponseAsync(m =>
         {
