@@ -115,12 +115,31 @@ public sealed class EvasionResponder
             return AutoBanOutcome.Exempt;
         }
 
-        var already = _bans.ActiveBans().Any(b => BanRules.SamePlayer(b.PlayerId, name));
+        var now = DateTimeOffset.UtcNow;
         var reason = $"Ban evasion - {join.Verdict.Detail ?? join.Verdict.Match.ToString()}";
+
+        /* THE SERVED-BAN CHECK. A temp ban leaves address and account flags behind, and
+           nothing removes them until the ban is lifted - so from the moment the ban expires
+           until the expiry sweep gets to it, that player's own leftovers look exactly like
+           evasion. Banning there converts the two days they served into forever.
+
+           BanRules.AutoBanDecision has drawn this distinction since it was written. It was
+           never called: this method decided for itself from ActiveBans() alone, which cannot
+           see an expired record at all, so the served-ban case took the default path and was
+           re-banned permanently. The one-hour exemption /unban sets was the only thing
+           standing in the way, and it lapses long before the player comes back. */
+        var existing = _bans.LoadBans()
+            .Where(b => BanRules.SamePlayer(b.PlayerId, name))
+            .OrderByDescending(b => b.At)
+            .FirstOrDefault();
+
+        if (BanRules.AutoBanDecision(existing, join.Verdict.Detail, now) == AutoBanAction.Lift)
+            return await ReleaseServedAsync(name, join, ct).ConfigureAwait(false);
+
+        var already = _bans.ActiveBans().Any(b => BanRules.SamePlayer(b.PlayerId, name));
 
         if (!already)
         {
-            var now = DateTimeOffset.UtcNow;
             var record = new BanRecord
             {
                 PlayerId = name,
@@ -146,12 +165,24 @@ public sealed class EvasionResponder
                 return bans;
             }, ct).ConfigureAwait(false);
 
-            /* Flag the NEW account id too, so the next alt is caught by the id rather than
-               only by an address they can change. Permanent ban, so the id flag is correct
-               here - it is exactly what a manual /permban does. */
-            await _tracking.RequestFlagAsync(join.AccountId, flagAccountId: true, ct).ConfigureAwait(false);
+            /* THE ACCOUNT ID, AND NOTHING ELSE.
 
-            await FlagAttachedAccountsAsync(join, ct).ConfigureAwait(false);
+               This used to call RequestFlagAsync, which flags every address the caught
+               account has ever confirmed, and then FlagAttachedAccountsAsync, which flagged
+               every account that had ever shared one of those addresses. A flag is an
+               automatic permanent ban on the next connection, so both of those turned one
+               match into several new standing bans - written by the machine, from the
+               machine's own conclusion, with nothing human in between.
+
+               That is a feedback loop, and on a residential ISP it is a spreading one: a
+               single false positive flags the victim's other addresses, then everyone who
+               ever shared any of them, and each of those bans flags more addresses when it
+               fires. Nothing expires, so it only ever grows.
+
+               The id is the one thing here that is evidence rather than inference: THIS
+               account connected and matched a standing flag. Flag it, ban it, and stop. An
+               address flag is a human's call, through /configure. */
+            await _tracking.FlagAccountAsync(join.AccountId, ct).ConfigureAwait(false);
         }
 
         var enforcement = await _bans.HardEnforceAsync(name, join.AccountId, ct: ct).ConfigureAwait(false);
@@ -171,79 +202,64 @@ public sealed class EvasionResponder
     }
 
     /// <summary>
-    /// Flag the accounts attached to this one, so they are caught the moment they connect.
+    /// Release a player whose ban was already served, instead of banning them again.
     /// </summary>
     /// <remarks>
-    /// FLAGGED, NOT BANNED OUTRIGHT, and the distinction is the whole design.
-    ///
-    /// The attachment comes from <see cref="IpTrackingService.AltsOf"/>, which links accounts
-    /// by CONFIRMED shared address - and that method's own remarks are the reason this stops
-    /// short of a ban: "households, phone tethering and student halls all put unrelated people
-    /// on one address". Banning every account ever seen on an evader's address would, on a
-    /// shared connection or a recycled ISP lease, ban people whose only connection to them is
-    /// an ISP. The registry has no expiry, so it would reach back over the whole history of
-    /// the server.
-    ///
-    /// A flag closes the same hole without that cost. An attached account that never returns
-    /// is never touched; one that connects is auto-banned on sight by the very path that just
-    /// ran, with the same master and exempt protections applied and the same audit line
-    /// written. The evader gains nothing - every account they own is caught the moment they
-    /// use it - and somebody who merely shares a router is not banned in absentia for a game
-    /// they were not playing.
-    ///
-    /// Failures here are logged and swallowed: the ban that triggered this has already landed,
-    /// and losing it because a secondary flag could not be written would be the wrong trade.
+    /// The lift is the point. Returning early would leave the record and the flags exactly
+    /// as they are, so the very next connection would arrive here again and again, and the
+    /// player would sit unable to play with nothing in any log explaining why. Lifting
+    /// clears the record, the flags, the native ban on every server and sets the exemption,
+    /// which is what should have happened when the ban expired.
     /// </remarks>
-    private async Task FlagAttachedAccountsAsync(FlaggedJoin join, CancellationToken ct)
+    private async Task<AutoBanOutcome> ReleaseServedAsync(string name, FlaggedJoin join, CancellationToken ct)
     {
-        IReadOnlyList<PavlovBot.Core.Evasion.AccountRecord> attached;
+        _logger.LogWarning(
+            "AUTO-BAN REFUSED - {Name} [{Account}] matched {Detail}, but that is their own served " +
+            "ban's leftovers. Lifting it rather than escalating to permanent",
+            name, join.AccountId, join.Verdict.Detail);
+        _metrics.Increment("autoban_refused_total", MetricLabels.Of("reason", "served"));
+
         try
         {
-            attached = _tracking.AltsOf(join.AccountId);
+            await _bans.LiftAsync(name, join.AccountId, ct).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            _logger.LogWarning(ex, "Could not read the accounts attached to {Account}", join.AccountId);
-            return;
+            /* Swallowed deliberately. The player is NOT banned by this path either way - the
+               only cost of a failed lift is that the stale flags survive and the next
+               connection takes this same branch again. Rethrowing would abort log ingestion
+               for the rest of the line. */
+            _logger.LogError(ex, "Could not lift the served ban on \"{Name}\" - the stale flags remain", name);
+            return AutoBanOutcome.Served;
         }
 
-        var flagged = 0;
-        foreach (var alt in attached)
-        {
-            /* The same protections as the primary ban. An attached account belonging to a
-               master is not evidence of anything except that staff share a house with a
-               player, and flagging it would auto-ban them on their next connection. */
-            var altName = alt.Names.FirstOrDefault();
-            if (altName is not null && (_masters.IsMaster(altName) || _masters.IsExempt(altName))) continue;
+        await _audit.RecordAsync("autoban-released", "auto", name,
+            $"Served ban's flags cleared instead of re-banning - {join.Verdict.Detail}", ct).ConfigureAwait(false);
 
-            try
-            {
-                await _tracking.RequestFlagAsync(alt.Id, flagAccountId: true, ct).ConfigureAwait(false);
-                flagged++;
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException)
-            {
-                _logger.LogWarning(ex, "Could not flag the attached account {Account}", alt.Id);
-            }
-        }
+        await SafePostAsync($"[AUTO-BAN SKIPPED] {Sanitize.Message(name)}  |  {join.Verdict.Detail}" +
+                            "  |  their own served ban, lifted instead of re-banning").ConfigureAwait(false);
 
-        if (flagged > 0)
-            _logger.LogWarning(
-                "Flagged {Count} account(s) attached to {Account} - they will be banned on their next connection",
-                flagged, join.AccountId);
+        return AutoBanOutcome.Served;
     }
 
-    private async Task PostAsync(string name, FlaggedJoin join, bool already)
+    private Task PostAsync(string name, FlaggedJoin join, bool already) =>
+        /* WHICH LIST THE FLAG CAME FROM. Both read "blacklisted ip 1.2.3.4", and the answer
+           to "why was this person banned" is completely different depending on whether an
+           owner typed that address in or a previous ban left it behind. Working that out
+           used to mean opening /configure and comparing lists by eye. */
+        SafePostAsync($"[AUTO-BAN] {Sanitize.Message(name)}  |  {join.Verdict.Detail}" +
+                      $" ({(join.Verdict.Manual ? "set by an owner" : "from a ban")})" +
+                      (already ? "  |  already banned, removed again" : ""));
+
+    private async Task SafePostAsync(string line)
     {
-        var line = $"[AUTO-BAN] {Sanitize.Message(name)}  |  {join.Verdict.Detail}" +
-                   (already ? "  |  already banned, removed again" : "");
         try
         {
             await _feeds.PostAsync(FeedWebhooks.Connect, line).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
-            _logger.LogDebug(ex, "Could not post the auto-ban to the connect feed");
+            _logger.LogDebug(ex, "Could not post to the connect feed");
         }
     }
 }
@@ -259,6 +275,9 @@ public enum AutoBanOutcome
 
     /// <summary>Skipped: they served a ban and their flags have not been swept.</summary>
     Exempt,
+
+    /// <summary>Their ban was already served: lifted rather than escalated to permanent.</summary>
+    Served,
 
     /// <summary>Already banned - enforced again, record untouched.</summary>
     EnforcedExisting,
