@@ -441,7 +441,7 @@ public sealed class BanService
            Two halves, and both are needed:
 
              THE TOMBSTONE stops the importer resurrecting them. It is the half that survives
-             an export that fails, a MODSAVE_BLACKLIST_PATH that is wrong, or a file somebody
+             an export that fails, a BLACKLIST_PATH that is wrong, or a file somebody
              edits by hand - none of which the export below can do anything about.
 
              THE EXPORT stops the GAME banning them. The server reads that file itself, so a

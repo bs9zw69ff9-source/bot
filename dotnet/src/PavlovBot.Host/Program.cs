@@ -756,14 +756,30 @@ public static class Program
            mods.txt and whitelist.txt. Finding one of those with entries in it while pointed
            at the other is worth saying out loud, because it is not visible from anywhere
            else. */
+        /* A RETIRED SETTING THAT USED TO WIN. MODSAVE_BLACKLIST_PATH pointed at a mod's own
+           file while the server enforced Config/blacklist.txt, and because it took priority
+           over the correct default, every .env that still carried it kept syncing the wrong
+           file. It is ignored now, and an operator who set it deliberately has to be told
+           that to their face - a setting that quietly stops working is worse than one that
+           was quietly wrong. */
+        if (features.IgnoredBanFilePath is { Length: > 0 } retired)
+        {
+            logger.LogWarning(
+                "MODSAVE_BLACKLIST_PATH is set to {Retired} and is NO LONGER USED. This bot syncs " +
+                "{Configured}, which is the file the server itself reads. Delete the setting from " +
+                "your .env; if you really need a different file, set BLACKLIST_PATH instead",
+                retired, features.BanFilePath);
+        }
+
         if (features.BanFilePath is { Length: > 0 } banFile)
         {
             if (!File.Exists(banFile))
             {
                 logger.LogWarning(
                     "The ban file {Path} does not exist, so in-game bans are never imported and " +
-                    "/unban cannot remove anybody from it. Set MODSAVE_BLACKLIST_PATH to the file " +
-                    "your server actually reads", banFile);
+                    "/unban cannot remove anybody from it. Create it beside mods.txt and " +
+                    "whitelist.txt, or set BLACKLIST_PATH to the file your server actually reads",
+                    banFile);
             }
 
             foreach (var rival in installs
@@ -780,7 +796,7 @@ public static class Program
                     "{Rival} has {Lines} line(s) in it, and it is NOT the file this bot syncs " +
                     "({Configured}). If the server reads that one, players listed there are banned " +
                     "by the SERVER and this bot cannot see or lift them - /banlist and /checkban " +
-                    "will say they are not banned. Point MODSAVE_BLACKLIST_PATH at whichever file " +
+                    "will report the file they DO read. Point BLACKLIST_PATH at whichever file " +
                     "your server actually enforces", rival, listed, banFile);
             }
         }

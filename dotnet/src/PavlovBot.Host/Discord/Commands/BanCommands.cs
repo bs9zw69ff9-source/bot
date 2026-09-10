@@ -13,24 +13,57 @@ namespace PavlovBot.Host.Discord.Commands;
 
 /// <summary>Shared plumbing for the commands that issue and lift bans.</summary>
 /// <summary>
-/// What "not banned" leaves unsaid.
+/// What the server's own ban file says, on the answers where it is the whole question.
 /// </summary>
 /// <remarks>
 /// THE BOT'S BAN STORE IS NOT THE ONLY THING THAT KEEPS A PLAYER OUT. Pavlov reads its own
 /// ban file directly, so somebody listed there is refused by the SERVER whatever this bot
-/// thinks - and the bot only sees or edits that file when MODSAVE_BLACKLIST_PATH points at
-/// it. Unset or wrong, the sync is off, no record is ever imported, and both /banlist and
-/// /checkban answer "nothing" about a player who cannot get in.
+/// thinks.
 ///
-/// Said on the NEGATIVE answers only. That is where the gap is: a "yes, banned" reply is
-/// already the end of the question, and repeating this under every result would bury it.
+/// This used to be a fixed paragraph of guesswork printed under every negative answer -
+/// "if they are still refused in game, maybe the file lists them, check the startup log".
+/// It was the correct caveat and it was useless: the moderator asking "why is he still
+/// banned" got told where they might go and look. The file is now READ, and the answer
+/// says which.
+///
+/// Rendered on the NEGATIVE answers only. A "yes, banned" reply is already the end of the
+/// question, and the sync keeps the file matching the store in that case anyway.
 /// </remarks>
-internal static class BanFileCaveat
+internal static class BanFileReport
 {
-    public const string Text =
-        "If they are still refused in game, the server's own ban file lists them. " +
-        "Pavlov reads that file itself, so no RCON unban clears it - the bot only manages it " +
-        "when `MODSAVE_BLACKLIST_PATH` points at it. The startup log says whether it does.";
+    /// <summary>The line to add under "not banned by this bot".</summary>
+    public static string Describe(BanFileLookup lookup)
+    {
+        ArgumentNullException.ThrowIfNull(lookup);
+
+        var file = lookup.Path is { Length: > 0 } p ? $"`{Sanitize.Code(p)}`" : "the server's ban file";
+
+        return lookup.Status switch
+        {
+            BanFileStatus.Read when lookup.Entry is { } entry =>
+                $"{Theme.Deny} **The server's own ban file lists them.** Pavlov reads {file} " +
+                $"itself, so they are refused in game no matter what this bot's record says.\n" +
+                $"Reason in the file: {Sanitize.Code(entry.Reason)} — {Sanitize.Code(entry.Unban)}",
+
+            BanFileStatus.Read =>
+                $"{Theme.Ok} Not in the server's own ban file either ({file}).",
+
+            /* NOT "they are not banned". The file is the half of the answer that could not be
+               read, and saying nothing about that is how a wrong path stays invisible for
+               weeks while players insist they are still locked out. */
+            BanFileStatus.Missing =>
+                $"{Theme.Warn} The server's ban file {file} **does not exist**, so this bot cannot " +
+                "tell you what the server itself is enforcing. Point `BLACKLIST_PATH` at the real one.",
+
+            BanFileStatus.Unreadable =>
+                $"{Theme.Warn} The server's ban file {file} **could not be read** - check its " +
+                "permissions. If they are still refused in game, that file is why.",
+
+            _ =>
+                $"{Theme.Warn} No ban file is configured, so this bot cannot see or edit what the " +
+                "server itself enforces. Set `BLACKLIST_PATH`.",
+        };
+    }
 }
 
 public abstract class BanCommandBase : ISlashCommand
@@ -249,7 +282,8 @@ public sealed class PermBanCommand(
 
 /// <summary><c>/unban</c> - lift a ban, subject to the staff hierarchy.</summary>
 public sealed class UnbanCommand(
-    BanService bans, IpTrackingService tracking, SerializedStore store, Access access, AuditLog audit, ILogger<UnbanCommand> logger)
+    BanService bans, IpTrackingService tracking, SerializedStore store, Access access, AuditLog audit,
+    ServerBanFile banFile, ILogger<UnbanCommand> logger)
     : BanCommandBase(bans, tracking, store, access, audit, logger)
 {
     public override string Name => "unban";
@@ -274,8 +308,36 @@ public sealed class UnbanCommand(
 
         if (existing is null)
         {
-            await Reply(command, Theme.Notice("No ban to lift",
-                $"**{Sanitize.Code(player)}** is not banned by this bot.\n\n{BanFileCaveat.Text}")).ConfigureAwait(false);
+            /* NO RECORD IS NOT THE SAME AS NOT BANNED. The server reads its ban file itself,
+               so a name listed there is refused whatever this bot's store says - and an
+               in-game ban that the importer never picked up (a wrong path, a sync that has
+               not run) lives ONLY in that file. This used to reply "not banned by this bot"
+               and stop, which is a true sentence that leaves the player locked out.
+
+               Lifting anyway is what the moderator asked for. LiftAsync writes the unban
+               tombstone, sends the native unban and rewrites the file from the store - and
+               the store does not list them, so the rewrite is what removes them. */
+            var listed = await banFile.FindAsync(player, ct).ConfigureAwait(false);
+
+            if (!listed.Listed)
+            {
+                await Reply(command, Theme.Notice("No ban to lift",
+                    $"**{Sanitize.Code(player)}** is not banned by this bot.\n\n{BanFileReport.Describe(listed)}"))
+                    .ConfigureAwait(false);
+                return;
+            }
+
+            await Bans.LiftAsync(player, Tracking.AccountByName(player)?.Id, ct).ConfigureAwait(false);
+            await Audit.RecordAsync("unban", command.User.Username, player,
+                $"Removed from the server's ban file - {listed.Entry!.Reason}", ct).ConfigureAwait(false);
+
+            await Reply(command, Theme.Success("Removed from the server's ban file",
+                    $"**{Sanitize.Code(player)}** had no record with this bot, but the server's own " +
+                    $"ban file listed them - which is why they were still being refused.")
+                .AddField("Was", $"{Sanitize.Code(listed.Entry.Reason)} — {Sanitize.Code(listed.Entry.Unban)}")
+                .AddField("File", $"`{Sanitize.Code(listed.Path ?? "unknown")}`")
+                .AddField("Lifted by", command.User.Username, true)
+                .Brand()).ConfigureAwait(false);
             return;
         }
 
@@ -315,7 +377,8 @@ public sealed class UnbanCommand(
 
 /// <summary><c>/checkban</c> - what, if anything, is on a player.</summary>
 public sealed class CheckBanCommand(
-    BanService bans, IpTrackingService tracking, SerializedStore store, Access access, AuditLog audit, ILogger<CheckBanCommand> logger)
+    BanService bans, IpTrackingService tracking, SerializedStore store, Access access, AuditLog audit,
+    ServerBanFile banFile, ILogger<CheckBanCommand> logger)
     : BanCommandBase(bans, tracking, store, access, audit, logger)
 {
     public override string Name => "checkban";
@@ -335,8 +398,16 @@ public sealed class CheckBanCommand(
 
         if (record is null)
         {
-            await Reply(command, Theme.Success("No ban on record",
-                $"**{Sanitize.Code(player)}** is not banned by this bot.\n\n{BanFileCaveat.Text}")).ConfigureAwait(false);
+            /* The file is read rather than described. "Not banned by this bot" was answering a
+               narrower question than the one being asked, every time. */
+            var listed = await banFile.FindAsync(player, ct).ConfigureAwait(false);
+            var body = $"**{Sanitize.Code(player)}** is not banned by this bot.\n\n{BanFileReport.Describe(listed)}";
+
+            await Reply(command, listed.Listed
+                ? Theme.Punishment($"{Theme.Deny} Banned by the server", body)
+                    .AddField("Lift it", "`/unban` removes them from that file.")
+                    .Brand()
+                : Theme.Success("No ban on record", body)).ConfigureAwait(false);
             return;
         }
 
@@ -364,9 +435,9 @@ public sealed class CheckBanCommand(
         embed.AddField("Where this came from", record.Moderator switch
         {
             "in-game" =>
-                "The game's own ban file, not this bot. It was imported from `MODSAVE_BLACKLIST_PATH` " +
-                "and re-applied - so the reason above may be old, and clearing the bot's blacklist " +
-                "will not touch it. `/unban` removes it from the file as well as the store.",
+                "The game's own ban file, not this bot. It was imported from the file the server " +
+                "reads and re-applied - so the reason above may be old, and clearing the bot's " +
+                "blacklist will not touch it. `/unban` removes it from the file as well as the store.",
             "auto" =>
                 "This bot, automatically - VPN screening or ban evasion. The reason above says which. " +
                 "Nothing a human typed is involved, and the blacklist in `/configure` is only the " +

@@ -177,7 +177,7 @@ install — and it means the clone must name both of the others, not just the sh
 #### Everything below stops applying
 
 Separate installs means separate files. The clone can have its own
-`MODSAVE_BLACKLIST_PATH`, `PAYROLL_AMOUNT` and `MODSAVE_PATH`, all pointed inside
+`BLACKLIST_PATH`, `PAYROLL_AMOUNT` and `MODSAVE_PATH`, all pointed inside
 `pavlovserver2`. The collision rules below only matter if two bots really do share one
 install.
 
@@ -191,11 +191,15 @@ is wrong: two bots against one server share the game's files, and several subsys
 
 ### The ban list — only ONE bot may own it
 
-`ModsaveBanlist.ExportAsync` rewrites the entire blacklist from that bot's ban store. Two
+`ServerBanFile.ExportAsync` rewrites the entire blacklist from that bot's ban store. Two
 bots doing that means each one erases every ban the other made, every five minutes, forever.
 
-**Leave `MODSAVE_BLACKLIST_PATH` blank on the clone.** The clone can still ban over RCON;
-it just does not manage the file.
+**Set `BLACKLIST_SYNC=false` on the clone.** The clone can still ban over RCON; it just does
+not manage the file.
+
+Leaving the path blank does **not** do this, and never did - blank falls through to the
+default `<PAVLOV_BASE_1>/Pavlov/Saved/Config/blacklist.txt`, which on a shared install is the
+very file the first bot owns. `BLACKLIST_SYNC=false` is the only thing that turns it off.
 
 ### Payroll — only ONE bot may pay
 
@@ -343,7 +347,7 @@ PAVLOV_LOGS=/home/steam/pavlovserver2/Pavlov/Saved/Logs/Pavlov.log
 
 FACTION_ROLES_PATH=/home/steam/pavlovserver2/Pavlov/Saved/Config/ModSave/FactionRoles
 MODSAVE_PATH=/home/steam/pavlovserver2/Pavlov/Saved/Config/ModSave
-MODSAVE_BLACKLIST_PATH=/home/steam/pavlovserver2/Pavlov/Saved/Config/ModSave/blacklist.txt
+BLACKLIST_PATH=/home/steam/pavlovserver2/Pavlov/Saved/Config/blacklist.txt
 
 # ── never touch the other bot's installs ──
 IGNORE_PATHS=/home/steam/pavlovserver,/home/steam/pavlovserver1
@@ -412,9 +416,9 @@ other" looks like. If the clone fails to restart the deploy says so loudly rathe
 
 ### Sharing one install instead
 
-If the clone has no install of its own, blank `MODSAVE_PATH`, `MODSAVE_BLACKLIST_PATH` and
-`PAYROLL_AMOUNT`, share `FACTION_ROLES_PATH` with the first bot, and read the collision rules
-above. Everything else is the same.
+If the clone has no install of its own, blank `MODSAVE_PATH` and `PAYROLL_AMOUNT`, set
+`BLACKLIST_SYNC=false`, share `FACTION_ROLES_PATH` with the first bot, and read the collision
+rules above. Everything else is the same.
 
 ## Confirming it came up as the right bot
 

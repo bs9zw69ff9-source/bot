@@ -329,7 +329,7 @@ public class BanLiftTests : IAsyncDisposable
     /// </summary>
     /// <remarks>
     /// THE BACKSTOP, and the half that survives what the export cannot fix: a wrong
-    /// MODSAVE_BLACKLIST_PATH, a failed write, or a file somebody edits by hand. Each of those
+    /// a wrong BLACKLIST_PATH, a failed write, or a file somebody edits by hand. Each of those
     /// leaves the player listed in a file the importer trusts.
     /// </remarks>
     [Fact]

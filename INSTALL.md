@@ -99,7 +99,8 @@ place where a wrong value makes a command report success and change nothing:
 PAVLOV_BASE_1=/home/steam/pavlovserver
 MODSAVE_PATH=/home/steam/pavlovserver/Pavlov/Saved/Config/ModSave
 FACTION_ROLES_PATH=/home/steam/pavlovserver/Pavlov/Saved/Config/ModSave/FactionRoles
-MODSAVE_BLACKLIST_PATH=   # the game's own blacklist file
+BLACKLIST_PATH=           # the game's own blacklist file; blank uses
+                          # <PAVLOV_BASE_1>/Pavlov/Saved/Config/blacklist.txt
 ```
 
 The bot **never creates a directory inside a game install**. A path that does not
