@@ -49,6 +49,12 @@ public sealed record FeatureOptions
     /// <summary>The game's own ban-list file - the message a banned player sees.</summary>
     public string? BanFilePath { get; init; }
 
+    /// <summary>
+    /// A retired MODSAVE_BLACKLIST_PATH found in the environment, so startup can say it is
+    /// being ignored. Nothing reads this to decide anything.
+    /// </summary>
+    public string? IgnoredBanFilePath { get; init; }
+
     /// <summary>Where plugin assemblies live. Null uses ./plugins.</summary>
     public string? PluginDirectory { get; init; }
 
@@ -307,13 +313,26 @@ public sealed record FeatureOptions
                reported nothing about him and /unban could not reach him. That is the whole
                of the bug this default fixes.
 
-               MODSAVE_BLACKLIST_PATH is still read, because an existing .env sets it and
-               having it silently ignored is how the previous version of this went wrong. */
-            BanFilePath = Text(configuration, "BLACKLIST_PATH")
-                ?? Text(configuration, "MODSAVE_BLACKLIST_PATH")
-                ?? System.IO.Path.Combine(
-                    Text(configuration, "PAVLOV_BASE_1") ?? "/home/steam/pavlovserver",
-                    "Pavlov", "Saved", "Config", "blacklist.txt"),
+               MODSAVE_BLACKLIST_PATH IS NO LONGER READ. It was kept as a fallback so an
+               existing .env would not change meaning, and that is exactly what kept the bug
+               alive: every deployment that had ever set it went on syncing ModSave while the
+               server enforced Config/blacklist.txt, and the fallback made the correct default
+               unreachable without editing the file. It is reported at startup instead - see
+               IgnoredBanFilePath - because a setting that stops working must say so.
+
+               BLACKLIST_SYNC=false TURNS IT OFF, and there had to be a way. The ban file is
+               rewritten in full from one bot's store, so two bots pointed at one install
+               erase each other's bans every five minutes - which is why SECOND-BOT.md tells
+               the clone not to manage it. Its instruction was to leave the path blank, and
+               blank has never disabled anything: the default fills it in. */
+            BanFilePath = OptionalFlag(configuration, "BLACKLIST_SYNC") == false
+                ? null
+                : Text(configuration, "BLACKLIST_PATH")
+                    ?? System.IO.Path.Combine(
+                        Text(configuration, "PAVLOV_BASE_1") ?? "/home/steam/pavlovserver",
+                        "Pavlov", "Saved", "Config", "blacklist.txt"),
+
+            IgnoredBanFilePath = Text(configuration, "MODSAVE_BLACKLIST_PATH"),
 
             /* Two DIFFERENT webhooks. CONNECT carries addresses and belongs in a private
                channel; JOIN is the plain public log. The port read CONNECT into the join

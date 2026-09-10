@@ -11,6 +11,38 @@ namespace PavlovBot.Host.Moderation;
 /// <param name="Unban">The raw "Unban:" line, e.g. "3d 4h" or "Permanent".</param>
 public sealed record BanFileEntry(string Name, string Reason, string Unban);
 
+/// <summary>Why a ban-file lookup found nothing, which is not one answer but four.</summary>
+public enum BanFileStatus
+{
+    /// <summary>No path configured, so the bot neither reads nor writes any ban file.</summary>
+    Disabled,
+
+    /// <summary>Configured, but nothing is there. Usually the wrong path.</summary>
+    Missing,
+
+    /// <summary>There, and could not be read. Permissions, almost always.</summary>
+    Unreadable,
+
+    /// <summary>Read successfully. Only here does "not listed" mean "not banned".</summary>
+    Read,
+}
+
+/// <summary>
+/// What the server's own ban file says about one player.
+/// </summary>
+/// <remarks>
+/// The STATUS matters as much as the entry. "Not in the file" and "the file could not be
+/// read" are the same absence of an entry and completely different answers to give a
+/// moderator, and reporting the second as the first is how a wrong path stays invisible.
+/// </remarks>
+public sealed record BanFileLookup(BanFileStatus Status, string? Path, BanFileEntry? Entry)
+{
+    public bool Listed => Entry is not null;
+
+    /// <summary>True when the file was actually read, so "not listed" can be trusted.</summary>
+    public bool Conclusive => Status == BanFileStatus.Read;
+}
+
 /// <summary>
 /// The game's own ban-list file: the message a banned player sees, and a way in.
 /// </summary>
@@ -41,6 +73,48 @@ public sealed class ServerBanFile(
     private bool _pathWarned;
 
     public bool Enabled => !string.IsNullOrWhiteSpace(path);
+
+    /// <summary>The file this syncs, so a command can name it rather than describe it.</summary>
+    public string? Path => path;
+
+    /// <summary>
+    /// What the server's own ban file says about one player.
+    /// </summary>
+    /// <remarks>
+    /// THE QUESTION /checkban AND /unban COULD NOT ANSWER. The server reads this file itself,
+    /// so a name in it is refused whatever the bot's store says. Both commands used to answer
+    /// from the store alone and then print a paragraph of guesswork about the file - which is
+    /// how "banlist and checkban both return nothing but he is still in the blacklist" happens
+    /// and stays unexplained. Reading it costs one file read on a command nobody spams.
+    ///
+    /// BOTH IDENTITIES ARE COMPARED, the same as the importer: an in-game ban is filed under
+    /// the EOS id while staff type the display name, and matching only one of them is how a
+    /// listed player looks absent.
+    /// </remarks>
+    public async Task<BanFileLookup> FindAsync(string player, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(player);
+
+        if (!Enabled) return new BanFileLookup(BanFileStatus.Disabled, path, null);
+        if (!File.Exists(path)) return new BanFileLookup(BanFileStatus.Missing, path, null);
+
+        IReadOnlyList<BanFileEntry> parsed;
+        try
+        {
+            parsed = Parse(await File.ReadAllTextAsync(path!, ct).ConfigureAwait(false));
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            logger.LogWarning(ex, "Could not read the server ban file {Path}", path);
+            return new BanFileLookup(BanFileStatus.Unreadable, path, null);
+        }
+
+        var match = parsed.FirstOrDefault(e =>
+            BanRules.SamePlayer(e.Name, player) ||
+            BanRules.SamePlayer(ResolveName(e.Name, resolveName), player));
+
+        return new BanFileLookup(BanFileStatus.Read, path, match);
+    }
 
     /// <summary>
     /// How long a deliberate unban blocks the importer from re-creating that ban.
@@ -264,7 +338,7 @@ public sealed class ServerBanFile(
            came back on their own a few minutes after /unban reported success.
 
            The lift rewrites the file now, so in the normal case there is nothing here to skip.
-           This is the half that holds when the export failed, when MODSAVE_BLACKLIST_PATH is
+           This is the half that holds when the export failed, when BLACKLIST_PATH is
            wrong, or when somebody edits the file by hand. */
         var lifted = store.Read(Datasets.UnbanTombstones,
             new Dictionary<string, DateTimeOffset>(StringComparer.OrdinalIgnoreCase));

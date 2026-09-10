@@ -185,6 +185,68 @@ public class ServerBanFileTests : IDisposable
         Assert.Equal(0, await disabled.ImportAsync());
     }
 
+    [Fact]
+    public async Task TheFileIsSearchedByNameSo_checkban_CanAnswerForTheServer()
+    {
+        /* "banlist and checkban both return nothing but he is still in the blacklist.txt".
+           The store was the only thing either command looked at, so a ban living only in the
+           file - an in-game ban the importer never reached - was invisible. */
+        await File.WriteAllTextAsync(_path, "Alice\nReason: Cheating\nUnban: Permanent\n\n");
+
+        var found = await _modsave.FindAsync("Alice");
+
+        Assert.True(found.Listed);
+        Assert.True(found.Conclusive);
+        Assert.Equal("Cheating", found.Entry!.Reason);
+        Assert.Equal(_path, found.Path);
+    }
+
+    [Fact]
+    public async Task TheFileIsSearchedByTheResolvedNameToo()
+    {
+        /* An in-game ban is filed under the EOS id while staff type the display name. The
+           importer already compares both identities; matching only one here would report a
+           listed player as absent, which is the same bug in a different command. */
+        await File.WriteAllTextAsync(_path, "76561198000000042\nReason: Cheating\nUnban: Permanent\n\n");
+
+        var byId = new ServerBanFile(_path, _store, NullLogger<ServerBanFile>.Instance, new FixedClock(),
+            resolveName: id => id == "76561198000000042" ? "Alice" : null);
+
+        Assert.True((await byId.FindAsync("Alice")).Listed);
+        Assert.True((await byId.FindAsync("76561198000000042")).Listed);
+    }
+
+    [Fact]
+    public async Task NotListedAndCouldNotReadAreDifferentAnswers()
+    {
+        /* Both are "no entry", and reporting the second as the first is how a wrong path
+           stays invisible while players insist they are still locked out. */
+        await File.WriteAllTextAsync(_path, "Bob\nReason: Griefing\nUnban: Permanent\n\n");
+        var absent = await _modsave.FindAsync("Alice");
+        Assert.False(absent.Listed);
+        Assert.True(absent.Conclusive);
+
+        File.Delete(_path);
+        var missing = await _modsave.FindAsync("Alice");
+        Assert.False(missing.Listed);
+        Assert.False(missing.Conclusive);
+        Assert.Equal(BanFileStatus.Missing, missing.Status);
+
+        var off = await new ServerBanFile(null, _store, NullLogger<ServerBanFile>.Instance).FindAsync("Alice");
+        Assert.Equal(BanFileStatus.Disabled, off.Status);
+    }
+
+    [Fact]
+    public async Task ExportingWithNoStoredBansRemovesAFileOnlyEntry()
+    {
+        /* What /unban now relies on for a player the store has never heard of: the rewrite
+           is from the store, and the store does not list them. */
+        await File.WriteAllTextAsync(_path, "Alice\nReason: Cheating\nUnban: Permanent\n\n");
+
+        Assert.Equal(0, await _modsave.ExportAsync());
+        Assert.DoesNotContain("Alice", await File.ReadAllTextAsync(_path), StringComparison.Ordinal);
+    }
+
     public void Dispose()
     {
         GC.SuppressFinalize(this);

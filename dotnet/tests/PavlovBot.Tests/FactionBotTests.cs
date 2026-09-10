@@ -79,8 +79,11 @@ public class FactionBotTests
 /// <remarks>
 /// The C# bot built it as &lt;MODSAVE_PATH&gt;/ModSave/banlist.txt. MODSAVE_PATH already
 /// points AT the ModSave directory, so that was a doubled path that does not exist - the
-/// file a banned player's message is written to went somewhere the game never reads, and
-/// MODSAVE_BLACKLIST_PATH was ignored entirely.
+/// file a banned player's message is written to went somewhere the game never reads.
+///
+/// MODSAVE_BLACKLIST_PATH is retired: it named a mod's own file, took priority over the
+/// correct default, and so kept every deployment that had ever set it pointed at the wrong
+/// one. BLACKLIST_PATH is the override now.
 /// </remarks>
 public class BanFilePathTests
 {
@@ -93,22 +96,45 @@ public class BanFilePathTests
     public void AnExplicitOverrideWins()
     {
         var options = Bind(
-            ("MODSAVE_BLACKLIST_PATH", "/custom/banlist.txt"),
+            ("BLACKLIST_PATH", "/custom/blacklist.txt"),
             ("PAVLOV_BASE_1", "/home/steam/pavlovserver"),
             ("MODSAVE_PATH", "/home/steam/pavlovserver/Pavlov/Saved/Config/ModSave"));
 
-        Assert.Equal("/custom/banlist.txt", options.BanFilePath);
+        Assert.Equal("/custom/blacklist.txt", options.BanFilePath);
     }
 
     [Fact]
-    public void TheLegacyNameStillBindsSoAnExistingEnvKeepsWorking()
+    public void TheRetiredNameNoLongerChoosesTheFile()
     {
-        /* MODSAVE_BLACKLIST_PATH is what deployments already set. Dropping it would point
-           them back at the default without a word, which is the exact failure this whole
-           change is about. */
-        var options = Bind(("MODSAVE_BLACKLIST_PATH", "/legacy/blacklist.txt"));
+        /* IT USED TO WIN, and that is what kept the original bug alive: every .env that had
+           ever set it went on syncing a mod's file while the server enforced
+           Config/blacklist.txt, and the correct default was unreachable without an edit. */
+        var options = Bind(("MODSAVE_BLACKLIST_PATH", "/home/steam/pavlovserver/Pavlov/Saved/Config/ModSave/banlist.txt"));
 
-        Assert.Equal("/legacy/blacklist.txt", options.BanFilePath);
+        Assert.Equal("/home/steam/pavlovserver/Pavlov/Saved/Config/blacklist.txt", options.BanFilePath);
+    }
+
+    [Fact]
+    public void TheRetiredNameIsCarriedSoStartupCanSayItIsIgnored()
+    {
+        /* Silently ignoring a setting somebody deliberately wrote is worse than honouring a
+           wrong one - the operator has no way to find out. Nothing DECIDES on this value. */
+        var options = Bind(("MODSAVE_BLACKLIST_PATH", "/legacy/banlist.txt"));
+
+        Assert.Equal("/legacy/banlist.txt", options.IgnoredBanFilePath);
+        Assert.Null(Bind(("BLACKLIST_PATH", "/new/blacklist.txt")).IgnoredBanFilePath);
+    }
+
+    [Fact]
+    public void SyncCanBeTurnedOffOutright()
+    {
+        /* A SECOND BOT SHARING ONE INSTALL MUST NOT MANAGE THIS FILE - the export rewrites it
+           whole from one store, so two of them erase each other every five minutes.
+           SECOND-BOT.md said to leave the path blank, and blank never disabled anything
+           because the default fills it in. */
+        Assert.Null(Bind(("BLACKLIST_SYNC", "false"), ("BLACKLIST_PATH", "/custom/blacklist.txt")).BanFilePath);
+        Assert.NotNull(Bind(("BLACKLIST_SYNC", "true")).BanFilePath);
+        Assert.NotNull(Bind().BanFilePath);
     }
 
     [Fact]
