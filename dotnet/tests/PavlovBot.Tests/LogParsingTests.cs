@@ -308,6 +308,21 @@ public class FlagMatchingTests
     }
 
     [Fact]
+    public void TheVerdictSaysWhetherAnOwnerSetTheFlagOrABanLeftItBehind()
+    {
+        /* Both render as "blacklisted ip 203.0.113.5", and "why was this person banned" has
+           completely different answers depending on which. The DETAIL text stays identical
+           on purpose - BanRules.AutoBanDecision matches on that wording - so the source
+           travels beside it instead of being encoded into it. */
+        Assert.True(FlagMatching.Check(Flags(manual: ["203.0.113.5"]), "203.0.113.5", null, null).Manual);
+        Assert.False(FlagMatching.Check(Flags(ips: ["203.0.113.5"]), "203.0.113.5", null, null).Manual);
+
+        // A username flag is only ever set by hand; an account flag only ever by a ban.
+        Assert.True(FlagMatching.Check(Flags(names: ["Alice"]), null, "Alice", null).Manual);
+        Assert.False(FlagMatching.Check(Flags(ids: ["0002abc"]), null, null, "0002abc").Manual);
+    }
+
+    [Fact]
     public void NamesAndIdsMatchCaseInsensitively_AddressesDoNot()
     {
         Assert.True(FlagMatching.Check(Flags(names: ["alice"]), null, "ALICE", null).Hit);

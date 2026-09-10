@@ -99,7 +99,12 @@ public enum FlagMatch
 }
 
 /// <param name="Detail">The reason text the ban decision inspects; wording matters.</param>
-public sealed record FlagVerdict(FlagMatch Match, string? Detail = null)
+/// <param name="Manual">
+/// True when an owner set this flag by hand, false when a ban left it behind. Both render
+/// identically in <see cref="Detail"/>, and they answer "why was this person banned" very
+/// differently, so the distinction is carried rather than looked up again later.
+/// </param>
+public sealed record FlagVerdict(FlagMatch Match, string? Detail = null, bool Manual = false)
 {
     public bool Hit => Match != FlagMatch.None;
     public static FlagVerdict Clean { get; } = new(FlagMatch.None);
@@ -124,8 +129,17 @@ public static class FlagMatching
     {
         ArgumentNullException.ThrowIfNull(flags);
 
-        if (ip is { Length: > 0 } && (flags.Ips.Contains(ip) || flags.ManualIps.Contains(ip)))
-            return new FlagVerdict(FlagMatch.Ip, $"blacklisted ip {ip}");
+        /* MANUAL FIRST, and the detail text is deliberately identical either way:
+           BanRules.AutoBanDecision matches on that wording, so changing it here would
+           quietly disable the served-ban protection. The source travels beside it instead. */
+        if (ip is { Length: > 0 })
+        {
+            if (flags.ManualIps.Contains(ip))
+                return new FlagVerdict(FlagMatch.Ip, $"blacklisted ip {ip}", Manual: true);
+
+            if (flags.Ips.Contains(ip))
+                return new FlagVerdict(FlagMatch.Ip, $"blacklisted ip {ip}");
+        }
 
         if (accountId is { Length: > 0 } && flags.Ids.Contains(accountId))
             return new FlagVerdict(FlagMatch.AccountId, $"blacklisted account {accountId}");
@@ -134,7 +148,7 @@ public static class FlagMatching
            the only one that outlives a served ban - so an address or account match should
            win when both apply, because those carry the ban's own expiry semantics. */
         if (name is { Length: > 0 } && flags.Names.Contains(name))
-            return new FlagVerdict(FlagMatch.Name, $"blacklisted username {name}");
+            return new FlagVerdict(FlagMatch.Name, $"blacklisted username {name}", Manual: true);
 
         return FlagVerdict.Clean;
     }

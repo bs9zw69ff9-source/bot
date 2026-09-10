@@ -492,6 +492,24 @@ public sealed class IpTrackingService : PavlovBot.Host.Moderation.IBanEvidence
         return new FlagOutcome(ips, [accountId], names, Pending: false);
     }
 
+    /// <summary>
+    /// Flag an account id, and only the account id.
+    /// </summary>
+    /// <remarks>
+    /// The flag an AUTOMATED ban is allowed to create. <see cref="RequestFlagAsync"/> also
+    /// flags every address the account has confirmed, which is correct when a human decided
+    /// to ban somebody and wrong when the machine did: an address flag auto-bans whoever
+    /// else is on that address, and on a residential connection that is a household or an
+    /// ISP lease that has since moved on.
+    ///
+    /// An id cannot be shared and cannot be changed, so it carries no collateral.
+    /// </remarks>
+    public Task FlagAccountAsync(string accountId, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(accountId);
+        return ApplyFlagsAsync([], [accountId], ct);
+    }
+
     /// <summary>An address flagged by hand. Survives an unban, by design.</summary>
     public Task FlagAddressManuallyAsync(string ip, CancellationToken ct = default) =>
         _store.UpdateAsync(Datasets.IpFlags, LoadStoredFlags(), flags => new StoredFlags(

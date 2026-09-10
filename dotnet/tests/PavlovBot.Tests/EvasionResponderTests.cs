@@ -182,17 +182,144 @@ public class EvasionResponderTests : IDisposable
     }
 
     [Fact]
-    public async Task AnAccountWithNoConfirmedAddressDefersItsFlagRatherThanLosingIt()
+    public async Task AnAccountWithNoConfirmedAddressIsStillFlaggedImmediately()
     {
-        /* The evader is still online, so the line that confirms their address is the
-           disconnect this ban is about to cause. Flagging nothing and moving on would let
-           them reconnect from the same address with nothing to catch them. */
+        /* The deferral this replaces existed to flag an ADDRESS the tracker did not know
+           yet, and an auto-ban no longer flags addresses at all. The id is known the moment
+           the join arrives, so there is nothing left to wait for - and waiting was itself a
+           failure mode, because the pending flag expires if the confirming disconnect never
+           lands. */
         await _responder.RespondAsync(Join("Evader", account: "76561198000000099"), CancellationToken.None);
+
+        Assert.Contains("76561198000000099", _tracking.LoadFlags().Ids);
 
         var pending = _store.Read(Datasets.AutobanExempt + "_pending",
             new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase));
+        Assert.Empty(pending);
+    }
 
-        Assert.Contains("76561198000000099", pending.Keys);
+    [Fact]
+    public async Task AnAutoBanFlagsNoAddresses()
+    {
+        /* THE FEEDBACK LOOP. This used to flag every address the caught account had
+           confirmed, so one match wrote new standing bans on addresses nobody had judged -
+           and on a residential ISP those addresses belong to a household or, after the
+           lease moves, a stranger. The next false positive then flagged more addresses. */
+        await _store.WriteAsync(Datasets.KnownPlayers, new Dictionary<string, AccountRecord>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["76561198000000042"] = new("76561198000000042", ["203.0.113.9", "198.51.100.7"], [], ["Evader"]),
+        });
+
+        await _responder.RespondAsync(Join("Evader", account: "76561198000000042"), CancellationToken.None);
+
+        Assert.Empty(_tracking.LoadFlags().Ips);
+        Assert.Empty(_tracking.LoadFlags().ManualIps);
+    }
+
+    [Fact]
+    public async Task AnAutoBanDoesNotFlagAccountsSharingTheAddress()
+    {
+        /* Flagging the neighbours was justified as milder than banning them, which it is
+           not: a flag is an automatic permanent ban on the next connection. Households,
+           tethering and student halls all put unrelated people on one address, so this
+           banned bystanders for a game they were not playing. */
+        await _store.WriteAsync(Datasets.KnownPlayers, new Dictionary<string, AccountRecord>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["76561198000000042"] = new("76561198000000042", ["203.0.113.9"], [], ["Evader"]),
+            ["76561198000000077"] = new("76561198000000077", ["203.0.113.9"], [], ["Housemate"]),
+        });
+
+        await _responder.RespondAsync(Join("Evader", account: "76561198000000042"), CancellationToken.None);
+
+        Assert.DoesNotContain("76561198000000077", _tracking.LoadFlags().Ids);
+    }
+
+    [Fact]
+    public async Task AServedBanIsLiftedRatherThanEscalatedToPermanent()
+    {
+        /* THE WORST FAILURE THIS SYSTEM CAN PRODUCE, and it was reachable on every server.
+           A temp ban leaves address and account flags behind; nothing clears them until the
+           ban is lifted. Between the ban expiring and the sweep noticing, the player's own
+           leftovers look exactly like evasion, and the two days they served became forever.
+
+           BanRules.AutoBanDecision has drawn this distinction since it was written and
+           nothing called it. */
+        await _store.WriteAsync<List<BanRecord>>(Datasets.TempBans,
+        [
+            new BanRecord
+            {
+                PlayerId = "Evader",
+                UniqueId = "76561198000000001",
+                Reason = "Griefing",
+                Moderator = "SomeMod",
+                At = DateTimeOffset.UtcNow.AddDays(-3),
+                Expires = DateTimeOffset.UtcNow.AddMinutes(-5),
+                Permanent = false,
+                DurationLabel = "2d",
+            },
+        ]);
+
+        var outcome = await _responder.RespondAsync(Join("Evader"), CancellationToken.None);
+
+        Assert.Equal(AutoBanOutcome.Served, outcome);
+        Assert.Empty(Bans());
+    }
+
+    [Fact]
+    public async Task AnUnexpiredTempBanIsEnforcedWithoutBecomingPermanent()
+    {
+        /* Rewriting the record would silently promote an active temp ban to permanent every
+           time they retried, which a retry loop does every few seconds. */
+        await _store.WriteAsync<List<BanRecord>>(Datasets.TempBans,
+        [
+            new BanRecord
+            {
+                PlayerId = "Evader",
+                UniqueId = "76561198000000001",
+                Reason = "Griefing",
+                Moderator = "SomeMod",
+                At = DateTimeOffset.UtcNow.AddHours(-1),
+                Expires = DateTimeOffset.UtcNow.AddDays(1),
+                Permanent = false,
+                DurationLabel = "2d",
+            },
+        ]);
+
+        var outcome = await _responder.RespondAsync(Join("Evader"), CancellationToken.None);
+
+        Assert.Equal(AutoBanOutcome.EnforcedExisting, outcome);
+
+        var record = Assert.Single(Bans());
+        Assert.False(record.Permanent);
+        Assert.Equal("SomeMod", record.Moderator);
+    }
+
+    [Fact]
+    public async Task AServedBanCaughtByAnOwnerSetNameFlagIsStillBanned()
+    {
+        /* A username flag is the one an owner types by hand, never a side effect of a ban,
+           so it has no expiry to have served. Treating it like the leftovers of a temp ban
+           would let anybody undo a standing block by serving an unrelated ban first. */
+        await _store.WriteAsync<List<BanRecord>>(Datasets.TempBans,
+        [
+            new BanRecord
+            {
+                PlayerId = "Evader",
+                UniqueId = "76561198000000001",
+                Reason = "Griefing",
+                Moderator = "SomeMod",
+                At = DateTimeOffset.UtcNow.AddDays(-3),
+                Expires = DateTimeOffset.UtcNow.AddMinutes(-5),
+                Permanent = false,
+                DurationLabel = "2d",
+            },
+        ]);
+
+        var join = new FlaggedJoin("76561198000000001", "Evader", "203.0.113.9",
+            new FlagVerdict(FlagMatch.Name, "blacklisted username Evader", Manual: true), DateTimeOffset.UtcNow);
+
+        Assert.Equal(AutoBanOutcome.Banned, await _responder.RespondAsync(join, CancellationToken.None));
+        Assert.True(Assert.Single(Bans()).Permanent);
     }
 
     [Fact]
