@@ -71,10 +71,8 @@ public sealed class PluginsCommand(PluginHost plugins, FeatureOptions features, 
            looking for the disable button, and the honest answer is faster than letting them
            search for it. */
         embed.AddField("Turning one off",
-            "Set `PLUGINS_DISABLED=name` in `.env` and restart. There is no runtime toggle: " +
-            ".NET cannot unload an assembly, so a disable command could stop a plugin working " +
-            "but not unload its code or detach what it subscribed to. A half-disable reported " +
-            "as a disable is worse than restarting.");
+            "Set `PLUGINS_DISABLED=name` in `.env` and restart. There is no runtime toggle — " +
+            ".NET cannot unload an assembly, so it would only ever be a half-disable.");
 
         embed.AddField("Permission scopes",
             "A plugin only reaches what it declares. Anything undeclared resolves to nothing " +

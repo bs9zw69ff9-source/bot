@@ -82,10 +82,10 @@ public sealed class FeedsCommand(FeedWebhooks feeds, FeatureOptions features, Ac
                 $"{Theme.Ok} delivering · {Theme.Warn} configured but nothing sent yet · " +
                 $"{Theme.Bad} failing · {Theme.Dot} no URL set\n\n" +
                 (test
-                    ? "A test line went to every configured feed, plus a sample **connection card** " +
-                      "to `connect` — the cards use a different code path than the plain lines, so " +
-                      "seeing the line but not the card narrows it to the card itself.\n" +
-                      "A feed still showing *configured* after this did not accept it."
+                    ? "A test line went to every feed, plus a sample **connection card** to `connect`. " +
+                      "Cards take a different path to plain lines, so seeing one and not the other " +
+                      "narrows it down.\n" +
+                      "Anything still showing *configured* did not accept it."
                     : "Run `/feeds test:true` to post a line to each one, and a sample card to `connect`."));
 
         await Reply(command, embed).ConfigureAwait(false);

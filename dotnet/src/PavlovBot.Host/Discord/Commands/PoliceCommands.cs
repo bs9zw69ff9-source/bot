@@ -460,8 +460,8 @@ public sealed class BailCommand(SerializedStore store, Access access) : ISlashCo
             await store.WriteAsync(Datasets.PoliceConfig, current with { MaxJailMinutes = (int)minutes.Value }, ct).ConfigureAwait(false);
 
             await Reply(command, Theme.Success("Sentence cap updated", minutes.Value > 0
-                ? $"A booking can now carry at most **{minutes.Value} min** of jail, however many charges are stacked.\n\n" +
-                  "Bail is **not** capped — stacking still costs the full amount, which is the deterrent."
+                ? $"A booking now tops out at **{minutes.Value} min** of jail, however many charges stack.\n\n" +
+                  "Bail is **not** capped."
                 : "The cap is off. Stacked charges add up with no limit.")).ConfigureAwait(false);
             return;
         }

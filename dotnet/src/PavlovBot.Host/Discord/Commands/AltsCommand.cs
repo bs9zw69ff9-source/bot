@@ -116,9 +116,8 @@ public sealed class AltsCommand(IpTrackingService tracking, Access access) : ISl
         /* Said on every reply that finds something, because this is the field that gets
            screenshotted into a staff channel and argued about. */
         embed.AddField($"{Theme.Info} What this means",
-            "Shared addresses are EVIDENCE, not proof. Households, phone tethering and shared " +
-            "VPN exits all put unrelated people on one address. Confirmed addresses only - " +
-            "guessed ones are never used for this.");
+            "Evidence, not proof. Households, tethering and shared VPN exits all put strangers " +
+            "on one address. Confirmed sightings only.");
 
         return embed.Brand("Alt detection");
     }

@@ -58,9 +58,8 @@ public sealed class ErrorsCommand(RecentErrors errors, Access access) : ISlashCo
         if (all.Count == 0)
         {
             return Theme.Success("No recent failures",
-                "Nothing has thrown since the bot last started.\n\n" +
-                "This list lives in memory, so a restart clears it. If you are chasing a failure " +
-                "from before the last restart, reproduce it once and run this again.");
+                "Nothing has thrown since the last restart.\n\n" +
+                "This list is in memory, so a restart clears it.");
         }
 
         var lines = all.Select(e =>
@@ -76,9 +75,9 @@ public sealed class ErrorsCommand(RecentErrors errors, Access access) : ISlashCo
         if (errors.Find(id) is not { } error)
         {
             return Theme.Failure("No such error",
-                $"Nothing recorded under `{Sanitize.Code(id)}`.\n\n" +
-                $"Only the last {RecentErrors.Capacity} are kept, and a restart clears them. " +
-                "Run `/errors` with no id to see what is still here.");
+                $"Nothing recorded under `{Sanitize.Code(id)}`. Only the last {RecentErrors.Capacity} " +
+                "are kept, and a restart clears them.\n\n" +
+                "Run `/errors` on its own to see what is left.");
         }
 
         /* THE END OF THE TRACE, NOT THE START. The frames nearest the throw are the ones that

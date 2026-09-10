@@ -41,9 +41,9 @@ internal static class BanFileReport
         return lookup.Status switch
         {
             BanFileStatus.Read when lookup.Entry is { } entry =>
-                $"{Theme.Deny} **The server's own ban file lists them.** Pavlov reads {file} " +
-                $"itself, so they are refused in game no matter what this bot's record says.\n" +
-                $"Reason in the file: {Sanitize.Code(entry.Reason)} — {Sanitize.Code(entry.Unban)}",
+                $"{Theme.Deny} **The server's own ban file lists them** ({file}). Pavlov reads it " +
+                $"directly, so they are refused in game whatever this bot says.\n" +
+                $"In the file: {Sanitize.Code(entry.Reason)} — {Sanitize.Code(entry.Unban)}",
 
             BanFileStatus.Read =>
                 $"{Theme.Ok} Not in the server's own ban file either ({file}).",
@@ -52,16 +52,16 @@ internal static class BanFileReport
                read, and saying nothing about that is how a wrong path stays invisible for
                weeks while players insist they are still locked out. */
             BanFileStatus.Missing =>
-                $"{Theme.Warn} The server's ban file {file} **does not exist**, so this bot cannot " +
-                "tell you what the server itself is enforcing. Point `BLACKLIST_PATH` at the real one.",
+                $"{Theme.Warn} {file} **does not exist**, so this cannot say what the server is " +
+                "enforcing. Point `BLACKLIST_PATH` at the real one.",
 
             BanFileStatus.Unreadable =>
-                $"{Theme.Warn} The server's ban file {file} **could not be read** - check its " +
-                "permissions. If they are still refused in game, that file is why.",
+                $"{Theme.Warn} {file} **could not be read** - check its permissions. If they are " +
+                "still refused in game, that file is why.",
 
             _ =>
-                $"{Theme.Warn} No ban file is configured, so this bot cannot see or edit what the " +
-                "server itself enforces. Set `BLACKLIST_PATH`.",
+                $"{Theme.Warn} No ban file is configured, so this cannot see what the server " +
+                "enforces. Set `BLACKLIST_PATH`.",
         };
     }
 }
@@ -242,8 +242,7 @@ public sealed class TempBanCommand(
         if (duration is null && !string.Equals(choice, BanDurations.Permanent, StringComparison.OrdinalIgnoreCase))
         {
             await Reply(command, Theme.Failure("That duration makes no sense",
-                "Use a length like `1d`, `3d 4h` or `1mo`. Calendar dates are not accepted - " +
-                "a ban is a length of time, not a deadline.")).ConfigureAwait(false);
+                "Use a length like `1d`, `3d 4h` or `1mo`. Calendar dates are not accepted.")).ConfigureAwait(false);
             return;
         }
 
@@ -332,8 +331,8 @@ public sealed class UnbanCommand(
                 $"Removed from the server's ban file - {listed.Entry!.Reason}", ct).ConfigureAwait(false);
 
             await Reply(command, Theme.Success("Removed from the server's ban file",
-                    $"**{Sanitize.Code(player)}** had no record with this bot, but the server's own " +
-                    $"ban file listed them - which is why they were still being refused.")
+                    $"**{Sanitize.Code(player)}** had no record with this bot. The server's own ban " +
+                    $"file listed them, and that entry is now gone.")
                 .AddField("Was", $"{Sanitize.Code(listed.Entry.Reason)} — {Sanitize.Code(listed.Entry.Unban)}")
                 .AddField("File", $"`{Sanitize.Code(listed.Path ?? "unknown")}`")
                 .AddField("Lifted by", command.User.Username, true)
@@ -435,13 +434,11 @@ public sealed class CheckBanCommand(
         embed.AddField("Where this came from", record.Moderator switch
         {
             "in-game" =>
-                "The game's own ban file, not this bot. It was imported from the file the server " +
-                "reads and re-applied - so the reason above may be old, and clearing the bot's " +
-                "blacklist will not touch it. `/unban` removes it from the file as well as the store.",
+                "The game's own ban file, not this bot - so the reason above may be old. `/unban` " +
+                "takes them out of the file as well as the store.",
             "auto" =>
-                "This bot, automatically - VPN screening or ban evasion. The reason above says which. " +
-                "Nothing a human typed is involved, and the blacklist in `/configure` is only the " +
-                "evasion half of it.",
+                "This bot, automatically - VPN screening or ban evasion. The reason above says " +
+                "which. Nobody typed it.",
             _ => "A moderator, using the ban commands.",
         }, inline: false);
 

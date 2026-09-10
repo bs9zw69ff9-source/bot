@@ -150,13 +150,12 @@ public sealed class FactionStatsCommand(
         {
             embed.AddField($"No record ({unknown.Count})",
                 Theme.Paginate(unknown.Take(15).Select(i => $"`{Sanitize.Code(i.Member.Player)}`"))[0] +
-                "\n\nThe bot has never watched these accounts connect. That usually means they " +
-                "predate its tracking or play under another name - **not** that they are inactive.");
+                "\n\nThe bot has never seen these connect — usually they predate its tracking or " +
+                "play under another name. **Not** the same as inactive.");
         }
 
         embed.AddField("Nothing was changed",
-            "This is a list to look at. No rank was altered and nobody was removed - " +
-            "use `/demotion` or `/whitelist remove` if that is what you decide.");
+            "Just a list. Use `/demotion` or `/whitelist remove` if you decide to act on it.");
 
         return embed;
     }
@@ -218,7 +217,7 @@ public sealed class EconomyIntelCommand(
         {
             await Reply(command, Theme.Warning("Money watching is off",
                 "Set `MONEY_ALERT_THRESHOLD` to start recording a rolling earnings window. " +
-                "Nothing is being collected until then, so there is nothing to audit.")).ConfigureAwait(false);
+            "Nothing is collected until then.")).ConfigureAwait(false);
             return;
         }
 
@@ -282,8 +281,7 @@ public sealed class EconomyIntelCommand(
         if (!windows.TryGetValue(player, out var window) || window.Entries.Count == 0)
         {
             return Theme.Notice($"{Sanitize.Code(player)} — no recent credits",
-                $"Nothing recorded in the last {detector.Window.TotalMinutes:F0} minutes. The window " +
-                "is rolling, so this only ever covers recent activity.");
+                $"Nothing recorded in the last {detector.Window.TotalMinutes:F0} minutes.");
         }
 
         var credits = window.Entries.Select(e => e.Amount).ToList();

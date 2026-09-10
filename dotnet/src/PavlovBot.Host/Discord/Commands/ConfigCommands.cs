@@ -176,7 +176,7 @@ public sealed class SetRolesCommand : ISlashCommand
             .Select(r => $"**{r.Label}** — {(r.Id is { } id ? $"<@&{id}>" : "*not set*")}");
 
         var embed = Theme.Success("Roles updated", string.Join("\n", lines))
-            .AddField("Owners", "Set through the environment, never a role - a role-based owner could be granted by anyone with Manage Roles.");
+            .AddField("Owners", "Set through the environment, never a role.");
 
         if (_unnameable.Count > 0)
         {

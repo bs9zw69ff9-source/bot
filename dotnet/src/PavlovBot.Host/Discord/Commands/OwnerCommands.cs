@@ -328,7 +328,8 @@ public sealed partial class FirewallCommand(AuditLog audit, Access access, ILogg
         var embed = action switch
         {
             "block" => Theme.Warning($"{Theme.Deny} Blocked at the firewall", $"`{Sanitize.Code(rawIp)}` is now denied.")
-                .AddField($"{Theme.Warn} Remember", "This blocks an ADDRESS, not an account. On a shared or CGNAT connection it affects everyone behind it, and only `/firewall unblock` undoes it."),
+                .AddField($"{Theme.Warn} That is an address, not an account",
+                    "On a shared or CGNAT connection it hits everyone behind it. Only `/firewall unblock` undoes it."),
             "unblock" => Theme.Success("Firewall block removed", $"`{Sanitize.Code(rawIp)}` is no longer denied."),
             _ => Theme.Notice("Firewall status", $"```\n{Truncate(output)}\n```"),
         };
