@@ -203,6 +203,26 @@ public class MembershipRulesTests
     }
 
     [Fact]
+    public void ASubclassIsNotARankAndCannotBeSetAsOne()
+    {
+        /* TWO DIFFERENT THINGS THAT BOTH READ AS "WHAT THEY ARE". A rank is a position on the
+           ladder and a member holds exactly one; a sub-class is ADDITIVE to whatever rank they
+           hold, and it lives in a separate dictionary with its own file. Order and Subclasses
+           never overlap.
+
+           Worth pinning rather than assuming: they are easy to confuse from the outside - the
+           author of this feature demonstrated it with "Veteran Ranger", which is an NCR
+           SUB-CLASS - and nothing else fails if a rank lookup started reaching into the
+           sub-class list. It would just quietly let /whitelist setrank strip somebody's rank
+           and file them under a loadout instead. */
+        foreach (var subclass in Nypd.Subclasses.Keys)
+        {
+            Assert.DoesNotContain(subclass, Nypd.Order);
+            Assert.Equal(MembershipOutcome.NoSuchRank, MembershipRules.SetRank(Nypd, "Cadet", subclass).Outcome);
+        }
+    }
+
+    [Fact]
     public void SettingTheRankTheyAlreadyHoldWritesNothing()
     {
         // Re-running it is the natural thing to do when somebody is unsure it took, and a

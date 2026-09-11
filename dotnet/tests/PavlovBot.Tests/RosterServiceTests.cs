@@ -426,6 +426,21 @@ public class RosterServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task SettingARankLeavesASubclassAlone()
+    {
+        /* A SUB-CLASS IS ADDITIVE TO A RANK, so moving somebody up or down the ladder must
+           not take it off them. ApplyRankAsync walks RankFiles and never touches Subclasses,
+           and this is what says so - a detective who gets promoted is still a detective. */
+        await _rosters.JoinAsync(Nypd, "Alice");
+        await _rosters.ChangeSubclassAsync(Nypd, "Alice", "Detective", removing: false);
+
+        await _rosters.SetRankAsync(Nypd, "Alice", "Sergeant");
+
+        Assert.Contains("Alice", Contents(Nypd.Subclasses["Detective"]));
+        Assert.Contains("Alice", Contents(Nypd.RankFiles["Sergeant"]));
+    }
+
+    [Fact]
     public async Task SettingARankHonoursHoldAllRanks()
     {
         /* THE SUBTLE HALF, and the reason this goes through the same write as a promotion
