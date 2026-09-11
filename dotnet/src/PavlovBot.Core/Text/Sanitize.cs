@@ -19,8 +19,18 @@ namespace PavlovBot.Core.Text;
 /// </remarks>
 public static partial class Sanitize
 {
-    /// <summary>Autocomplete display labels the bot itself appends, stripped back off.</summary>
-    [GeneratedRegex(@"\s*\((?:manual entry|offline)\)", RegexOptions.IgnoreCase)]
+    /// <summary>
+    /// The display tags the bot itself appends, stripped back off.
+    /// </summary>
+    /// <remarks>
+    /// KEPT IN STEP WITH <see cref="NameLabels.All"/> BY A TEST, not by hand - a source
+    /// generator cannot build a pattern from a runtime list, and the last time these were two
+    /// separate hand-written lists they drifted and banned "Aliceonline". The test fails if an
+    /// entry is added there and not here.
+    ///
+    /// No end anchor, so a name that came back wearing two of them loses both.
+    /// </remarks>
+    [GeneratedRegex(@"\s*\((?:online|offline|recent|manual entry|banned|nobody online)\)", RegexOptions.IgnoreCase)]
     private static partial Regex AutocompleteLabel { get; }
 
     [GeneratedRegex(@"\s*\[(?:s1|s2|s1\+s2)\]", RegexOptions.IgnoreCase)]
