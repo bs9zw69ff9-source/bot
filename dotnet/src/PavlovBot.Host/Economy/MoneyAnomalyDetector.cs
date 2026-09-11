@@ -82,7 +82,7 @@ public sealed class MoneyAnomalyDetector(
     /// </summary>
     /// <param name="changes">Straight from <see cref="MoneyLog.TickAsync"/>.</param>
     public async Task<IReadOnlyList<MoneyAlert>> ObserveAsync(
-        IReadOnlyCollection<(string Player, long Delta)> changes, CancellationToken ct = default)
+        IReadOnlyCollection<BalanceChange> changes, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(changes);
         if (!Enabled) return [];
@@ -95,7 +95,7 @@ public sealed class MoneyAnomalyDetector(
             new Dictionary<string, EarningWindow>(StringComparer.OrdinalIgnoreCase),
             windows =>
             {
-                foreach (var (player, delta) in changes)
+                foreach (var (player, delta, _) in changes)
                 {
                     if (delta <= 0) continue;   // credits only - see the class remarks
 

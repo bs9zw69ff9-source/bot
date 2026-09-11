@@ -48,7 +48,8 @@ public class MoneyLogTests : IDisposable
         Write("Alice", "5400");
         var changes = await _log.TickAsync();
 
-        Assert.Equal([("Alice", 400L)], changes);
+        // The resulting balance travels with the delta - the money feed prints both now.
+        Assert.Equal(new BalanceChange("Alice", 400L, 5400L), Assert.Single(changes));
     }
 
     [Fact]
@@ -58,7 +59,7 @@ public class MoneyLogTests : IDisposable
         await _log.TickAsync();
 
         Write("Alice", "4655");
-        Assert.Equal([("Alice", -345L)], await _log.TickAsync());
+        Assert.Equal(new BalanceChange("Alice", -345L, 4655L), Assert.Single(await _log.TickAsync()));
     }
 
     [Fact]
@@ -87,7 +88,48 @@ public class MoneyLogTests : IDisposable
         Assert.Equal(5000, _log.Cached("Alice"));   // the old value survives
 
         Write("Alice", "5500");
-        Assert.Equal([("Alice", 500L)], await _log.TickAsync());
+        Assert.Equal(new BalanceChange("Alice", 500L, 5500L), Assert.Single(await _log.TickAsync()));
+    }
+
+    [Fact]
+    public async Task AFileThatIsNotALedgerIsReadOnceAndThenSkipped()
+    {
+        /* WHY THE MONEY LOG WAS SLOW. The ledger directory is MODSAVE_PATH, which also holds
+           blacklist.txt, whitelist.txt, mods.txt and donator.txt. Those never parse as a
+           number, and only SUCCESSFUL reads were cached - so the "unchanged since last look"
+           check could never fire for one, and every one of them was read from disk in full on
+           every tick. Six times a minute, forever, for files the size of a whitelist. */
+        Write("Alice", "5000");
+        Write("whitelist", string.Join("\n", Enumerable.Range(0, 500).Select(i => $"Player{i}")));
+
+        await _log.TickAsync();
+
+        // Tracked, so the mtime check applies to it from here on.
+        Assert.Equal(2, _log.Tracked);
+        Assert.Equal(1, _log.Ledgers);
+        Assert.Null(_log.Cached("whitelist"));
+
+        // And it never becomes a reported change, however many ticks run.
+        Assert.Empty(await _log.TickAsync());
+        Assert.Empty(await _log.TickAsync());
+    }
+
+    [Fact]
+    public async Task ANonLedgerIsPickedUpAgainWhenItActuallyChanges()
+    {
+        /* The other half: caching the skip must not mean never looking again. A ledger caught
+           MID-WRITE parses as garbage exactly like a whitelist does, and finishing the write
+           has to bring it back. */
+        Write("Alice", "<partial write>");
+        await _log.TickAsync();
+        Assert.Null(_log.Cached("Alice"));
+
+        Write("Alice", "5000");
+        await _log.TickAsync();
+        Assert.Equal(5000, _log.Cached("Alice"));
+
+        Write("Alice", "5400");
+        Assert.Equal(new BalanceChange("Alice", 400L, 5400L), Assert.Single(await _log.TickAsync()));
     }
 
     [Fact]
@@ -110,8 +152,11 @@ public class MoneyLogTests : IDisposable
         Write("Alice", "1400");
         Write("Bob", "1655");
 
-        var changes = (await _log.TickAsync()).OrderBy(c => c.Player).ToList();
-        Assert.Equal([("Alice", 400L), ("Bob", -345L)], changes);
+        var changes = (await _log.TickAsync()).OrderBy(c => c.Player, StringComparer.Ordinal).ToList();
+
+        Assert.Equal(2, changes.Count);
+        Assert.Equal(new BalanceChange("Alice", 400L, 1400L), changes[0]);
+        Assert.Equal(new BalanceChange("Bob", -345L, 1655L), changes[1]);
     }
 
     [Fact]
