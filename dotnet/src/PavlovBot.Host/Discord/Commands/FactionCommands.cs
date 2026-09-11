@@ -79,6 +79,17 @@ public sealed class WhitelistCommand(RosterService rosters, FactionMembers membe
                     "Keep every rank at or below theirs on promotion, not just the one they hold",
                     isRequired: false))
             .AddOption(new SlashCommandOptionBuilder()
+                .WithName("setrank").WithDescription("Whitelist Leader - Put a member at a rank directly")
+                .WithType(ApplicationCommandOptionType.SubCommand)
+                .AddOption(Faction()).AddOption(Member())
+                /* AUTOCOMPLETED, NOT A CHOICE LIST, because the legal ranks depend on the
+                   faction picked in the option beside this one and Discord has no way to
+                   express that in a static list. A flat list of every rank in every faction
+                   would also run past the 25-choice cap the moment a faction is added. */
+                .AddOption(new SlashCommandOptionBuilder()
+                    .WithName("rank").WithDescription("Which rank - suggestions follow the faction you picked")
+                    .WithType(ApplicationCommandOptionType.String).WithRequired(true).WithAutocomplete(true)))
+            .AddOption(new SlashCommandOptionBuilder()
                 .WithName("remove").WithDescription("Whitelist Leader - Remove a member from their faction")
                 .WithType(ApplicationCommandOptionType.SubCommand)
                 .AddOption(Member()))
@@ -133,6 +144,13 @@ public sealed class WhitelistCommand(RosterService rosters, FactionMembers membe
         if (sub.Name == "remove")
         {
             await RemoveAsync(command, member, ct).ConfigureAwait(false);
+            return;
+        }
+
+        if (sub.Name == "setrank")
+        {
+            await SetRankAsync(command, member, Resolve(options),
+                options.GetValueOrDefault("rank")?.ToString() ?? "", ct).ConfigureAwait(false);
             return;
         }
 
@@ -221,6 +239,117 @@ public sealed class WhitelistCommand(RosterService rosters, FactionMembers membe
     /// They are still whitelisted in the game, and saying so is more useful than a bare
     /// failure - the fix is to re-add them through the command, which records the link.
     /// </remarks>
+    /// <summary>
+    /// Put a member at a named rank in one step.
+    /// </summary>
+    /// <remarks>
+    /// THE GAP /promotion AND /demotion LEFT. Both move somebody exactly one place, which is
+    /// right for the ordinary case and wrong for the two that come up most - hiring straight
+    /// into a rank, and dropping somebody several at once. Either meant running the same
+    /// command four or five times, rewriting the roster files on each pass, with the member
+    /// briefly holding every rank on the way.
+    ///
+    /// THE FACTION IS ASKED FOR rather than read off the membership index, which is what the
+    /// rank commands do. Setting a rank is the operation somebody reaches for when the
+    /// records and the files disagree, so making it depend on the index would mean it could
+    /// not fix the case it exists for. The index is still corrected on the way past.
+    /// </remarks>
+    private async Task SetRankAsync(
+        SocketSlashCommand command, IUser member, FactionDefinition? faction, string rank, CancellationToken ct)
+    {
+        /* GATED FIRST, before anything is read or written - the same reason as the rank
+           commands. Resolving the member discloses their in-game name and, for a stale
+           entry, deletes it, and neither should happen for somebody who manages nothing. */
+        if (!access.Allows(RequiredAccess.FactionLeader, command))
+        {
+            await Reply(command, Theme.Denied("Not allowed",
+                access.Refusal(RequiredAccess.FactionLeader, command))).ConfigureAwait(false);
+            return;
+        }
+
+        if (faction is null)
+        {
+            await Reply(command, Theme.Failure("Unknown faction")).ConfigureAwait(false);
+            return;
+        }
+
+        if (!access.CanManage(command.User, faction.Name))
+        {
+            await Reply(command, Theme.Denied("Not your roster",
+                $"You do not manage the **{faction.Name}** whitelist.")).ConfigureAwait(false);
+            return;
+        }
+
+        if (!faction.HasRanks)
+        {
+            await Reply(command, Theme.Failure($"{faction.Name} has no ranks",
+                $"**{faction.Name}** is spawn access only - there is no ladder to place " +
+                $"{member.Mention} on.")).ConfigureAwait(false);
+            return;
+        }
+
+        if (members.Of(member.Id) is not { } recorded)
+        {
+            await Reply(command, Theme.Failure("No membership on record",
+                $"{member.Mention} has no faction on record. Add them with `/whitelist add` first.")).ConfigureAwait(false);
+            return;
+        }
+
+        var player = recorded.Name;
+        var before = await rosters.FindAsync(player, ct).ConfigureAwait(false);
+
+        /* THE ROSTER FILE IS THE AUTHORITY, NOT THE INDEX - same rule as the rank commands.
+           An index entry outlives the roster it describes whenever a file is edited by hand,
+           and acting on it would place somebody who is not in the faction at all. */
+        if (before is null)
+        {
+            await members.ForgetAsync(member.Id, ct).ConfigureAwait(false);
+            await Reply(command, Theme.Failure("Not whitelisted",
+                $"{member.Mention} is recorded as **{Sanitize.Code(player)}**, who is not on any roster. " +
+                "The stale record has been cleared.")).ConfigureAwait(false);
+            return;
+        }
+
+        if (!string.Equals(before.Faction.Name, faction.Name, StringComparison.OrdinalIgnoreCase))
+        {
+            /* REFUSED RATHER THAN MOVED. A player belongs to one faction, and silently
+               switching them would strip their old roster as a side effect of what reads
+               like a rank change. Removing and re-adding is the deliberate way to do it. */
+            await Reply(command, Theme.Failure("Wrong faction",
+                $"{member.Mention} is in **{before.Faction.Name}**, not **{faction.Name}**. " +
+                "Use `/whitelist remove` then `/whitelist add` to move them.")).ConfigureAwait(false);
+            return;
+        }
+
+        var decision = await rosters.SetRankAsync(faction, player, rank, ct).ConfigureAwait(false);
+
+        logger.LogInformation("setrank | player=\"{Player}\" | faction={Faction} | by={By} | {Outcome} -> {Rank}",
+            player, faction.Name, command.User.Username, decision.Outcome, decision.Rank ?? "-");
+
+        if (decision.Outcome == MembershipOutcome.Allowed)
+        {
+            await audit.RecordAsync("setrank", command.User.Username, player,
+                $"{faction.Name} {before.Rank} -> {decision.Rank}", ct).ConfigureAwait(false);
+        }
+
+        var embed = decision.Outcome switch
+        {
+            MembershipOutcome.Allowed => Theme.Success($"{Theme.Rank} Rank set",
+                $"**{Sanitize.Code(player)}** — {before.Rank} → **{decision.Rank}**"),
+
+            MembershipOutcome.NoChange => Theme.Notice("Already there",
+                $"**{Sanitize.Code(player)}** is already **{decision.Rank}**. Nothing was written."),
+
+            MembershipOutcome.NoSuchRank => Theme.Failure("No such rank",
+                $"**{faction.Name}** has no rank called **{Sanitize.Code(rank)}**.\n\n" +
+                $"Its ranks are: {string.Join(", ", faction.Order.Select(r => $"**{r}**"))}."),
+
+            _ => MembershipReply.Fallback(decision),
+        };
+
+        await Reply(command, embed).ConfigureAwait(false);
+    }
+
     private async Task RemoveAsync(SocketSlashCommand command, IUser member, CancellationToken ct)
     {
         /* Gated up front for the same reason the rank commands are: the per-faction check

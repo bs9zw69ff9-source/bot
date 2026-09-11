@@ -23,7 +23,8 @@ namespace PavlovBot.Host.Discord;
 /// Discord allows at most 25 choices and gives roughly three seconds to answer, so this
 /// only ever reads what is already in memory or in one dataset - never RCON.
 /// </remarks>
-public sealed class PlayerAutocomplete(RconRegistry rcon, IpTrackingService tracking, SerializedStore store)
+public sealed class PlayerAutocomplete(
+    RconRegistry rcon, IpTrackingService tracking, SerializedStore store, PavlovBot.Host.Factions.RosterService rosters)
 {
     private const int MaxChoices = 25;
 
@@ -70,6 +71,37 @@ public sealed class PlayerAutocomplete(RconRegistry rcon, IpTrackingService trac
             choices.Add((NameLabels.Decorate(query, "manual entry"), query));
 
         return choices;
+    }
+
+    /// <summary>
+    /// The ranks of one faction, for <c>/whitelist setrank</c>.
+    /// </summary>
+    /// <remarks>
+    /// SCOPED TO THE FACTION PICKED BESIDE IT. Discord cannot express a choice list that
+    /// depends on another option, and a flat list of every rank in every faction would run
+    /// past the 25-choice cap as soon as a faction is added - as well as offering an NCR
+    /// moderator the Legion ladder.
+    ///
+    /// AN UNKNOWN FACTION OFFERS NOTHING, rather than falling back to every rank. The
+    /// command refuses a rank the faction does not have anyway, so suggesting one would only
+    /// walk somebody into a refusal; an empty list with the faction still blank reads as
+    /// "pick the faction first", which is what is actually true.
+    ///
+    /// Highest first. A rank being set by hand is far more often a promotion into seniority
+    /// than a placement at the bottom, and the bottom is what /whitelist add already gives.
+    /// </remarks>
+    public IReadOnlyList<(string Name, string Value)> SuggestRanks(string? faction, string typed)
+    {
+        if (rosters.Factions.Get((faction ?? "").Trim()) is not { } definition) return [];
+
+        var query = (typed ?? "").Trim();
+
+        return definition.Order
+            .Reverse()
+            .Where(r => query.Length == 0 || r.Contains(query, StringComparison.OrdinalIgnoreCase))
+            .Take(MaxChoices)
+            .Select(r => (Name: r, Value: r))
+            .ToList();
     }
 
     private static string Label(string name, string tag)
