@@ -97,6 +97,24 @@ public sealed class FeedBridge
     }
 
     /// <summary>
+    /// Take kills from Stats.log instead of from the Pavlov.log scrape.
+    /// </summary>
+    /// <remarks>
+    /// Attached after the host is built, like the other late wiring here: whether a
+    /// Stats.log exists is a discovery result, not something known at construction. The
+    /// tracker is told to stop scraping at the same moment, so exactly one of the two
+    /// sources is ever live.
+    /// </remarks>
+    public void UseStatsLog(StatsLogService stats)
+    {
+        ArgumentNullException.ThrowIfNull(stats);
+        stats.Killed += OnStatsKillAsync;
+    }
+
+    private Task OnStatsKillAsync(PavlovBot.Core.Logs.StatsKill kill) =>
+        Safe(() => _feeds.PostKillAsync(kill.Killer, kill.Killed, kill.Weapon, kill.At, kill.Headshot));
+
+    /// <summary>
     /// The public join line, and the first chance to act on a VPN.
     /// </summary>
     /// <remarks>

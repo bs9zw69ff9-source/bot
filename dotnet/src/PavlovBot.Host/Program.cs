@@ -309,6 +309,16 @@ public static class Program
         builder.Services.AddSingleton<FeedWebhooks>();
         builder.Services.AddSingleton<PavlovBot.Host.Logs.ServerLabels>();
         builder.Services.AddSingleton<FeedBridge>();
+        /* DISCOVERED ONCE, at registration, so the paths the tick polls and the paths the
+           wiring decision is made from cannot disagree. The logger is passed here and not to
+           the LogTailer.Discover call feeding it, because that one runs again inside the
+           background host and would say everything twice. */
+        builder.Services.AddSingleton(sp => new StatsLogService(
+            StatsLogService.Discover(features.StatsLogPaths, LogTailer.Discover(features.LogPaths),
+                sp.GetRequiredService<ILogger<StatsLogService>>()),
+            sp.GetRequiredService<LogTailer>(),
+            sp.GetRequiredService<MetricsRegistry>(),
+            sp.GetRequiredService<ILogger<StatsLogService>>()));
         builder.Services.AddSingleton<EvasionResponder>();
         /* Acts on a VPN verdict. Without it the screening ran on every connection, decided
            a ban, and nothing read the decision. */
@@ -856,7 +866,22 @@ public static class Program
         /* RESOLVED, not just registered. The bridge subscribes to the tracker's events in
            its constructor, and a service nobody asks for is never constructed - which is
            exactly how the join, connect and kill feeds came to be silent. */
-        host.Services.GetRequiredService<FeedBridge>();
+        var bridge = host.Services.GetRequiredService<FeedBridge>();
+
+        /* KILLS COME FROM Stats.log WHEN THERE IS ONE. Both sources describe the same kill,
+           so this switches rather than adds - the tracker stops scraping Pavlov.log for them
+           at the same moment the bridge starts listening to the stats reader. Wired here
+           because it depends on discovery having found a file, which is not known when
+           either service is constructed. */
+        var stats = host.Services.GetRequiredService<StatsLogService>();
+        if (stats.Enabled)
+        {
+            bridge.UseStatsLog(stats);
+            host.Services.GetRequiredService<IpTrackingService>().UseStatsLogKills();
+            logger.LogInformation(
+                "Kills are coming from Stats.log ({Count} file(s)) - with headshots and the game's own timestamps",
+                stats.Paths.Count);
+        }
 
         /* Same reason, and this one matters more: the responder subscribes to the tracker's
            Flagged event in its constructor. Registered but never resolved, ban-evasion
