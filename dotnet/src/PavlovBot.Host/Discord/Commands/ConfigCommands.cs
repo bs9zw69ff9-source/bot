@@ -405,9 +405,30 @@ public sealed class SuspendRankCommand(
 }
 
 /// <param name="HighStaff">Discord role granted the high-staff menu tier.</param>
-public sealed record MenuRoleMap(ulong? HighStaff = null, ulong? Staff = null)
+/// <param name="Staff">Discord role granted the ordinary staff menu tier.</param>
+/// <param name="Blacklist">Discord role that revokes menu access outright.</param>
+public sealed record MenuRoleMap(ulong? HighStaff = null, ulong? Staff = null, ulong? Blacklist = null)
 {
     public static MenuRoleMap Empty { get; } = new();
+
+    /// <summary>
+    /// This map over the environment's, tier by tier.
+    /// </summary>
+    /// <remarks>
+    /// WHAT /setrconroles SET WINS, because an admin who just ran it expects it to take
+    /// effect - that is the whole reason the command exists rather than a restart. The
+    /// environment is the bootstrap: it is what an install has before anybody has run the
+    /// command, and it keeps working untouched.
+    ///
+    /// PER TIER, NOT ALL OR NOTHING. Setting only the staff role must not silently drop a
+    /// high-staff role that only the environment knows about, which is exactly the kind of
+    /// half-configuration that reads as "the command broke my permissions".
+    /// </remarks>
+    public MenuRoleMap Over(ulong? environmentHighStaff, ulong? environmentStaff, ulong? environmentBlacklist) =>
+        new(HighStaff ?? environmentHighStaff, Staff ?? environmentStaff, Blacklist ?? environmentBlacklist);
+
+    /// <summary>Whether any tier is mapped at all. False means nobody can qualify.</summary>
+    public bool Any => HighStaff is not null || Staff is not null;
 
     /// <summary>
     /// The menu tier a member qualifies for, or null for none.
@@ -427,7 +448,8 @@ public sealed record MenuRoleMap(ulong? HighStaff = null, ulong? Staff = null)
 }
 
 /// <summary><c>/setrconroles</c> - which Discord roles map to which RCON+ menu tier.</summary>
-public sealed class SetRconRolesCommand(SerializedStore store, Access access, ILogger<SetRconRolesCommand> logger) : ISlashCommand
+public sealed class SetRconRolesCommand(
+    SerializedStore store, FeatureOptions features, Access access, ILogger<SetRconRolesCommand> logger) : ISlashCommand
 {
     public string Name => "setrconroles";
 
@@ -437,6 +459,7 @@ public sealed class SetRconRolesCommand(SerializedStore store, Access access, IL
             .WithDescription("Admin - Map Discord roles to RCON menu tiers")
             .AddOption("high_staff_role", ApplicationCommandOptionType.Role, "Gets the high-staff menu", isRequired: false)
             .AddOption("staff_role", ApplicationCommandOptionType.Role, "Gets the staff menu", isRequired: false)
+            .AddOption("blacklist_role", ApplicationCommandOptionType.Role, "Revokes menu access outright", isRequired: false)
             .Build();
 
     public async Task HandleAsync(SocketSlashCommand command, CancellationToken ct)
@@ -453,25 +476,47 @@ public sealed class SetRconRolesCommand(SerializedStore store, Access access, IL
 
         var high = Role("high_staff_role");
         var staff = Role("staff_role");
-        var changing = high is not null || staff is not null;
+        var blacklist = Role("blacklist_role");
+        var changing = high is not null || staff is not null || blacklist is not null;
 
         // Only what was supplied, same rule as /setroles: naming one must not clear the other.
         var updated = await store.UpdateAsync(Datasets.MenuRoles, MenuRoleMap.Empty, current => current with
         {
             HighStaff = high ?? current.HighStaff,
             Staff = staff ?? current.Staff,
+            Blacklist = blacklist ?? current.Blacklist,
         }, ct).ConfigureAwait(false);
 
         if (changing) logger.LogInformation("setrconroles | by={By}", command.User.Username);
 
-        var map = updated.Value;
-        await Reply(command, Theme.Notice("RCON menu roles", changing
+        /* SHOWN AS WHAT IS IN FORCE, not as what this command stored. A tier set in the
+           environment and not here is still the one doing the work, and a panel reading
+           "*not set*" under it sent somebody to set it again. */
+        var map = updated.Value.Over(features.MenuRoleHighStaff, features.MenuRoleStaff, features.MenuRoleBlacklist);
+
+        var embed = Theme.Notice("RCON menu roles", changing
             ? "Updated. A member gets the menu of their **highest** role below."
             : "Current mapping. Pass a role option to change it.")
-            .AddField("High staff", map.HighStaff is { } h ? $"<@&{h}>" : "*not set*", true)
-            .AddField("Staff", map.Staff is { } s ? $"<@&{s}>" : "*not set*", true)
-            .Brand("Priority: high staff beats staff")).ConfigureAwait(false);
+            .AddField("High staff", Show(map.HighStaff, updated.Value.HighStaff), true)
+            .AddField("Staff", Show(map.Staff, updated.Value.Staff), true)
+            .AddField("Blacklist", Show(map.Blacklist, updated.Value.Blacklist), true);
+
+        if (!map.Any)
+        {
+            embed.AddField($"{Theme.Warn} Nobody qualifies",
+                "Neither staff tier is mapped, so the menu panel refuses everyone. Set at least one.");
+        }
+
+        await Reply(command, embed.Brand("Priority: high staff beats staff")).ConfigureAwait(false);
     }
+
+    /// <summary>A role, and where it came from when it did not come from this command.</summary>
+    private static string Show(ulong? effective, ulong? stored) => effective switch
+    {
+        null => "*not set*",
+        { } id when stored is null => $"<@&{id}> *(from .env)*",
+        { } id => $"<@&{id}>",
+    };
 
     private static Task Reply(SocketSlashCommand command, EmbedBuilder embed) =>
         command.ModifyOriginalResponseAsync(m =>

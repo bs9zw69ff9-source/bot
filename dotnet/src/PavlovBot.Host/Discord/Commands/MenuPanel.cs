@@ -157,16 +157,28 @@ public sealed class MenuPanel(
     /// HIGHEST FIRST, and blacklist above everything: somebody holding both the blacklist
     /// role and a staff role has had their access revoked, so the revocation has to win.
     /// </remarks>
+    /// <summary>
+    /// The menu roles in force: what <c>/setrconroles</c> stored, over the environment.
+    /// </summary>
+    /// <remarks>
+    /// READ FRESH, not captured at startup. The point of the command is that an admin can fix
+    /// the mapping without a restart, and caching this would take that back.
+    /// </remarks>
+    private MenuRoleMap Roles() =>
+        store.Read(Datasets.MenuRoles, MenuRoleMap.Empty)
+            .Over(features.MenuRoleHighStaff, features.MenuRoleStaff, features.MenuRoleBlacklist);
+
     private string? TierOf(IUser? user)
     {
         var member = user as IGuildUser;
+        var roles = Roles();
 
         /* BLACKLIST STILL WINS, EVEN OVER AN OWNER. Everywhere else in the bot an owner
            passes every gate, and this is the one deliberate exception: the blacklist role is
            an explicit revocation somebody set on purpose, and an owner who wants it gone can
            remove the role in two clicks. Silently ignoring a revocation is the surprise
            that is worse than the inconvenience. */
-        if (features.MenuRoleBlacklist is { } barred && member is not null && member.RoleIds.Contains(barred))
+        if (roles.Blacklist is { } barred && member is not null && member.RoleIds.Contains(barred))
             return "blacklist";
 
         /* OWNERS GET THE TOP MENU without needing the staff role, and by user id - so it
@@ -177,9 +189,11 @@ public sealed class MenuPanel(
 
         if (member is null) return null;
 
-        if (features.MenuRoleHighStaff is { } high && member.RoleIds.Contains(high)) return "highstaff";
-        if (features.MenuRoleStaff is { } staff && member.RoleIds.Contains(staff)) return "staff";
-        return null;
+        /* THROUGH MenuRoleMap, which is where the highest-wins rule lives and was already
+           tested. This method used to do the same comparison itself against the environment
+           alone - so /setrconroles wrote a mapping that nothing on this path ever read, told
+           the admin it was updated, and the panel went on refusing them. */
+        return roles.TierFor(member.RoleIds);
     }
 
     private async Task GrantAsync(SocketModal modal, string selfId, string name, string tier, CancellationToken ct)

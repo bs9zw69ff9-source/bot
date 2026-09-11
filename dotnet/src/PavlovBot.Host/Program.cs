@@ -824,6 +824,33 @@ public static class Program
         if (host.Services.GetRequiredService<VpnScreeningService>().ConfigurationWarning() is { } warning)
             logger.LogWarning("{Warning}", warning);
 
+        /* THE MAPPING THAT IS ACTUALLY IN FORCE, from both sources. /setrconroles writes to
+           the database and the environment supplies the rest, so neither one on its own
+           answers "who can claim a menu" - and for a while nothing read the database half at
+           all, which presented as the command reporting success and the panel refusing the
+           admin who had just run it. */
+        if (features.MenuPanelChannel is not null)
+        {
+            var menuRoles = host.Services.GetRequiredService<SerializedStore>()
+                .Read(Datasets.MenuRoles, MenuRoleMap.Empty)
+                .Over(features.MenuRoleHighStaff, features.MenuRoleStaff, features.MenuRoleBlacklist);
+
+            if (menuRoles.Any)
+            {
+                logger.LogInformation("Menu roles: high staff {High}, staff {Staff}, blacklist {Blacklist}",
+                    menuRoles.HighStaff?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "unset",
+                    menuRoles.Staff?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "unset",
+                    menuRoles.Blacklist?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "unset");
+            }
+            else
+            {
+                logger.LogWarning(
+                    "The menu panel is in channel {Channel} but no staff role is mapped, in .env or by " +
+                    "/setrconroles - every claim will be refused as \"not eligible\". Run /setrconroles",
+                    features.MenuPanelChannel);
+            }
+        }
+
         /* SAID EVERY START, because this is the only thing in the bot that issues a PERMANENT
            ban with no human in the loop, on a verdict from a third party that is wrong about
            residential addresses often enough to matter. An operator should never have to work
