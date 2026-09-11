@@ -662,4 +662,56 @@ public class MenuRoleMapTests
         // Not a default of "everyone is staff", which is the dangerous way to be empty.
         Assert.Null(PavlovBot.Host.Discord.Commands.MenuRoleMap.Empty.TierFor([1, 2, 3]));
     }
+
+    // ---- what the command stored, over what the environment says ----
+
+    [Fact]
+    public void WhatTheCommandStoredBeatsTheEnvironment()
+    {
+        /* THE WHOLE POINT OF /setrconroles. An admin who just ran it expects it to take
+           effect - that is why the command exists instead of a restart. */
+        var stored = new PavlovBot.Host.Discord.Commands.MenuRoleMap(HighStaff: 10, Staff: 20);
+
+        var inForce = stored.Over(environmentHighStaff: 1, environmentStaff: 2, environmentBlacklist: 3);
+
+        Assert.Equal("highstaff", inForce.TierFor([10]));
+        Assert.Equal("staff", inForce.TierFor([20]));
+        Assert.Null(inForce.TierFor([1]));      // the environment's role no longer applies
+    }
+
+    [Fact]
+    public void TheEnvironmentStillAppliesToTiersTheCommandNeverSet()
+    {
+        /* PER TIER, NOT ALL OR NOTHING. Setting only the staff role must not silently drop a
+           high-staff role that only the environment knows about - that is the kind of half
+           configuration that reads as "the command broke my permissions". */
+        var stored = new PavlovBot.Host.Discord.Commands.MenuRoleMap(Staff: 20);
+
+        var inForce = stored.Over(environmentHighStaff: 1, environmentStaff: 2, environmentBlacklist: 3);
+
+        Assert.Equal("highstaff", inForce.TierFor([1]));
+        Assert.Equal("staff", inForce.TierFor([20]));
+        Assert.Equal(3ul, inForce.Blacklist);
+    }
+
+    [Fact]
+    public void AnEmptyStoreLeavesTheEnvironmentInCharge()
+    {
+        // The bootstrap case: an install that has never run the command keeps working.
+        var inForce = PavlovBot.Host.Discord.Commands.MenuRoleMap.Empty
+            .Over(environmentHighStaff: 1, environmentStaff: 2, environmentBlacklist: 3);
+
+        Assert.Equal("highstaff", inForce.TierFor([1]));
+        Assert.Equal("staff", inForce.TierFor([2]));
+        Assert.True(inForce.Any);
+    }
+
+    [Fact]
+    public void NeitherSourceSetMeansNobodyQualifies()
+    {
+        var inForce = PavlovBot.Host.Discord.Commands.MenuRoleMap.Empty.Over(null, null, null);
+
+        Assert.False(inForce.Any);
+        Assert.Null(inForce.TierFor([1, 2, 3]));
+    }
 }

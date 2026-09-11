@@ -523,7 +523,10 @@ public sealed record FeatureOptions
         $"menu panel: {(MenuPanelChannel is null
             ? "off (MENU_PANEL_CHANNEL not set)"
             : MenuRoleStaff is null && MenuRoleHighStaff is null
-                ? $"channel {MenuPanelChannel} - NO MENU_ROLE_STAFF/HIGHSTAFF, nobody qualifies"
+                /* NOT "nobody qualifies" any more. /setrconroles stores a mapping too, and
+                   this record only ever sees the environment - so an install configured
+                   entirely through the command was being told it was broken. */
+                ? $"channel {MenuPanelChannel} - no menu roles in .env; /setrconroles shows what is in force"
                 : $"channel {MenuPanelChannel}")}",
         $"verification: {(VerifyChannel is null || VerifyStaffChannel is null
             ? "off (needs VERIFY_CHANNEL and VERIFY_STAFF_CHANNEL)"
