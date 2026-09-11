@@ -18,12 +18,33 @@ namespace PavlovBot.Host.Economy;
 /// who was paid 500. A fabricated transaction in a money log is worse than a missed one,
 /// because somebody will act on it.
 ///
-/// Modification times are used to skip unchanged files, which is what keeps the scan cheap
-/// on a server with hundreds of ledgers.
+/// Modification time and length are used to skip unchanged files, which is what keeps the
+/// scan cheap on a server with hundreds of ledgers - and on a ModSave directory that also
+/// holds a whitelist, a ban list and whatever else has been dropped beside them.
 /// </remarks>
+/// <param name="Balance">The balance AFTER the change, so a reader does not have to add up.</param>
+public sealed record BalanceChange(string Player, long Delta, long Balance);
+
 public sealed class MoneyLog
 {
-    private sealed record CachedBalance(long Balance, DateTimeOffset ModifiedAt);
+    /// <param name="Balance">Null when the file is not a ledger - see the remarks on TickAsync.</param>
+    /// <param name="Length">
+    /// Paired with the timestamp so a write that lands inside one mtime tick is still seen.
+    /// A partial ledger and the finished one differ in length even when the clock does not.
+    /// </param>
+    private sealed record CachedBalance(long? Balance, DateTimeOffset ModifiedAt, long Length);
+
+    private enum ReadResult
+    {
+        /// <summary>A number. This is a ledger.</summary>
+        Ok,
+
+        /// <summary>Read fine, and its contents are not a balance. Almost always not a ledger.</summary>
+        NotANumber,
+
+        /// <summary>Could not be opened. Transient, so it must be retried rather than cached.</summary>
+        Unreadable,
+    }
 
     private readonly Dictionary<string, CachedBalance> _cache = new(StringComparer.OrdinalIgnoreCase);
     private readonly string? _directory;
@@ -42,12 +63,34 @@ public sealed class MoneyLog
 
     public bool Enabled => !string.IsNullOrWhiteSpace(_directory) && Directory.Exists(_directory);
 
-    /// <summary>Poll once. Returns the changes found, which is what the tests assert on.</summary>
-    public async Task<IReadOnlyList<(string Player, long Delta)>> TickAsync(CancellationToken ct = default)
+    /// <summary>
+    /// Poll once. Returns the changes found, which is what the tests assert on.
+    /// </summary>
+    /// <remarks>
+    /// WHY THIS USED TO GET SLOWER THE LONGER THE SERVER RAN. The ledger directory is
+    /// MODSAVE_PATH, and the game keeps other things in there: blacklist.txt, whitelist.txt,
+    /// mods.txt, donator.txt, whatever else an admin has dropped beside them. The scan takes
+    /// every *.txt, so all of those are opened too.
+    ///
+    /// A file that does not parse as a number was never CACHED - only successful reads were -
+    /// so the "unchanged since last look" check could never fire for one, and every one of
+    /// them was read from disk in full on every single tick. Six times a minute, forever, for
+    /// files the size of a whitelist. Nothing was wrong with the output, it just did more
+    /// work every tick than the actual ledgers cost.
+    ///
+    /// Now an unparseable file is remembered by timestamp and length like any other, so it is
+    /// read once and skipped until it actually changes. A ledger caught MID-WRITE still
+    /// retries, because finishing the write changes one or both of those.
+    ///
+    /// Reads are async. They were synchronous inside an async tick, which blocks a thread
+    /// pool thread for the whole batch - and the batch is at its largest exactly when payroll
+    /// has just paid everybody.
+    /// </remarks>
+    public async Task<IReadOnlyList<BalanceChange>> TickAsync(CancellationToken ct = default)
     {
         if (!Enabled) return [];
 
-        var changes = new List<(string Player, long Delta)>();
+        var changes = new List<BalanceChange>();
 
         foreach (var file in EnumerateLedgers())
         {
@@ -56,23 +99,47 @@ public sealed class MoneyLog
             var player = Path.GetFileNameWithoutExtension(file.Name);
             var cached = _cache.GetValueOrDefault(player);
 
-            // Unchanged since the last look: skip without opening it.
-            if (cached is not null && cached.ModifiedAt == file.LastWriteTimeUtc) continue;
-
-            if (!TryReadBalance(file.FullName, out var balance))
+            long length;
+            DateTimeOffset modified;
+            try
             {
-                /* THE CRITICAL BRANCH. Carry the cached entry forward WITH ITS OLD mtime, so
-                   the next tick retries and - crucially - the player is not treated as new. */
+                length = file.Length;
+                modified = file.LastWriteTimeUtc;
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                continue;   // deleted between the listing and now
+            }
+
+            // Unchanged since the last look: skip without opening it. This now covers the
+            // files that are not ledgers at all, which is the whole point.
+            if (cached is not null && cached.ModifiedAt == modified && cached.Length == length) continue;
+
+            var (result, balance) = await ReadBalanceAsync(file.FullName, ct).ConfigureAwait(false);
+
+            if (result == ReadResult.Unreadable)
+            {
+                /* THE CRITICAL BRANCH. Carry the cached entry forward UNCHANGED, so the next
+                   tick retries and - crucially - the player is not treated as new. Dropping
+                   it would report their whole balance as a credit on the next good read. */
                 if (cached is not null) _cache[player] = cached;
                 continue;
             }
 
-            _cache[player] = new CachedBalance(balance, file.LastWriteTimeUtc);
+            if (result == ReadResult.NotANumber)
+            {
+                // Remembered so it is not re-read every tick. The balance stays whatever was
+                // last known, so a ledger that is briefly garbage does not look like a new player.
+                _cache[player] = new CachedBalance(cached?.Balance, modified, length);
+                continue;
+            }
 
-            if (cached is null) continue;                    // first sighting is a baseline, not a change
-            if (balance == cached.Balance) continue;         // touched but unchanged
+            _cache[player] = new CachedBalance(balance, modified, length);
 
-            changes.Add((player, balance - cached.Balance));
+            if (cached?.Balance is not { } previous) continue;   // first sighting is a baseline
+            if (balance == previous) continue;                   // touched but unchanged
+
+            changes.Add(new BalanceChange(player, balance - previous, balance));
         }
 
         if (!_primed)
@@ -80,7 +147,21 @@ public sealed class MoneyLog
             /* The first tick builds the baseline. Reporting on it would announce every
                player's entire balance as a credit the moment the bot starts. */
             _primed = true;
-            _logger.LogInformation("Money log primed with {Count} ledger(s)", _cache.Count);
+
+            var ledgers = _cache.Values.Count(e => e.Balance is not null);
+            _logger.LogInformation("Money log primed with {Count} ledger(s)", ledgers);
+
+            /* NAMED, because it is the difference between a directory of ledgers and a
+               directory of ledgers plus everything else the game keeps. It is not an error -
+               MODSAVE_PATH is supposed to be the ModSave directory - but an operator seeing
+               the money log doing work should know how much of it is not ledgers. */
+            if (_cache.Count > ledgers)
+            {
+                _logger.LogInformation(
+                    "{Count} file(s) in {Directory} are not ledgers and will be skipped unless they change",
+                    _cache.Count - ledgers, _directory);
+            }
+
             return [];
         }
 
@@ -103,27 +184,34 @@ public sealed class MoneyLog
         }
     }
 
-    private bool TryReadBalance(string path, out long balance)
+    private static async Task<(ReadResult Result, long Balance)> ReadBalanceAsync(string path, CancellationToken ct)
     {
-        balance = 0;
+        string text;
         try
         {
-            var text = File.ReadAllText(path).Trim();
-            // The file is a bare number. Anything else is a partial write or a different
-            // file that happened to land here, and either way it is not a balance.
-            return long.TryParse(text, System.Globalization.NumberStyles.Integer,
-                System.Globalization.CultureInfo.InvariantCulture, out balance);
+            text = (await File.ReadAllTextAsync(path, ct).ConfigureAwait(false)).Trim();
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            return false;
+            return (ReadResult.Unreadable, 0);
         }
+
+        // The file is a bare number. Anything else is a partial write or a different file
+        // that happened to land here, and either way it is not a balance.
+        return long.TryParse(text, System.Globalization.NumberStyles.Integer,
+            System.Globalization.CultureInfo.InvariantCulture, out var balance)
+            ? (ReadResult.Ok, balance)
+            : (ReadResult.NotANumber, 0);
     }
 
     /// <summary>The last known balance, without touching the disk.</summary>
     public long? Cached(string player) => _cache.TryGetValue(player, out var entry) ? entry.Balance : null;
 
+    /// <summary>Files being tracked, ledgers and non-ledgers alike.</summary>
     public int Tracked => _cache.Count;
+
+    /// <summary>Files that actually hold a balance.</summary>
+    public int Ledgers => _cache.Values.Count(e => e.Balance is not null);
 }
 
 /// <summary>

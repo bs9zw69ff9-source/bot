@@ -289,3 +289,66 @@ public class ChannelStaffLogTests
         Assert.DoesNotContain("\n", reason, StringComparison.Ordinal);
     }
 }
+
+/// <summary>
+/// The money feed's batching, which is the only feed that posts a list.
+/// </summary>
+/// <remarks>
+/// PostAsync truncates at 1900 characters, which is right for one over-long line and loses
+/// entries for a list. The money feed posts one line per player paid, so a payroll run over
+/// a full server went past the limit and everything after roughly the sixtieth player became
+/// an ellipsis - with nothing to distinguish a complete log from a cut-off one.
+/// </remarks>
+public class MoneyFeedBatchTests
+{
+    private static IReadOnlyList<string> Lines(int count) =>
+        Enumerable.Range(0, count).Select(i => $"+1,500 to SomePlayerName{i:000}  →  12,340").ToList();
+
+    [Fact]
+    public void AShortBatchIsOneMessage()
+    {
+        var messages = FeedWebhooks.Batch("[stamp]", Lines(5));
+
+        var only = Assert.Single(messages);
+        Assert.StartsWith("[stamp]", only, StringComparison.Ordinal);
+        Assert.Equal(5, only.Split('\n').Length - 1);
+    }
+
+    [Fact]
+    public void ALongBatchSplitsRatherThanLosingEntries()
+    {
+        var lines = Lines(200);
+
+        var messages = FeedWebhooks.Batch("[stamp]", lines);
+
+        Assert.True(messages.Count > 1, "200 lines have to span more than one message");
+
+        // EVERY line survives, which is the whole point. Nothing is dropped and nothing is
+        // replaced by an ellipsis.
+        foreach (var line in lines)
+            Assert.Contains(messages, m => m.Contains(line, StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void EveryMessageFitsUnderTheTruncationLimit()
+    {
+        // Under PostAsync's own 1900, not at it - a batch that fits here is never truncated there.
+        foreach (var message in FeedWebhooks.Batch("[stamp]", Lines(200)))
+            Assert.True(message.Length <= 1900, $"a batched message was {message.Length} characters");
+    }
+
+    [Fact]
+    public void ContinuationMessagesSayThatTheyAre()
+    {
+        var messages = FeedWebhooks.Batch("[stamp]", Lines(200));
+
+        Assert.DoesNotContain("cont.", messages[0], StringComparison.Ordinal);
+        Assert.All(messages.Skip(1), m => Assert.Contains("cont.", m, StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void NoLinesProduceNoMessages()
+    {
+        Assert.Empty(FeedWebhooks.Batch("[stamp]", []));
+    }
+}

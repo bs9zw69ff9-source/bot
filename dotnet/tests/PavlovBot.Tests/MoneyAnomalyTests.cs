@@ -23,7 +23,7 @@ public class MoneyAnomalyTests
         new(_store, NullLogger<MoneyAnomalyDetector>.Instance,
             threshold, window ?? TimeSpan.FromMinutes(15), _time);
 
-    private static (string, long)[] Change(string player, long delta) => [(player, delta)];
+    private static BalanceChange[] Change(string player, long delta) => [new(player, delta, delta)];
 
     // ---- the threshold ----
 
@@ -84,7 +84,7 @@ public class MoneyAnomalyTests
     [Fact]
     public async Task EachPlayerIsCountedSeparately()
     {
-        var alerts = await Build().ObserveAsync([("Alice", 60_000), ("Bob", 60_000)]);
+        var alerts = await Build().ObserveAsync([new BalanceChange("Alice", 60_000, 60_000), new BalanceChange("Bob", 60_000, 60_000)]);
         Assert.Empty(alerts);
     }
 

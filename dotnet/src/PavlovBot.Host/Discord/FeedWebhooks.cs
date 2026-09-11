@@ -1,8 +1,10 @@
 using System.Collections.Concurrent;
+using System.Text;
 using Discord;
 using Discord.Webhook;
 using Microsoft.Extensions.Logging;
 using PavlovBot.Core.Text;
+using PavlovBot.Host.Economy;
 using PavlovBot.Core.Time;
 using PavlovBot.Host.Observability;
 
@@ -320,15 +322,77 @@ public sealed class FeedWebhooks : IAsyncDisposable
         return PostAsync(Kill, line, ct);
     }
 
-    /// <param name="changes">Player -> delta. Only players whose balance actually moved.</param>
-    public Task PostMoneyAsync(IReadOnlyCollection<(string Player, long Delta)> changes, DateTimeOffset at, CancellationToken ct = default)
+    /// <summary>
+    /// One tick's balance changes, in as many messages as it takes.
+    /// </summary>
+    /// <remarks>
+    /// THE MONEY FEED IS THE ONLY ONE THAT BATCHES, and it was the only one the 1900-character
+    /// truncation in <see cref="PostAsync"/> could actually hit. Every other feed posts one
+    /// short line. This posts one per player who was paid, so a payroll run over a full server
+    /// went past the limit and everything after roughly the sixtieth player was replaced with
+    /// an ellipsis - silently, with no way to tell a complete log from a cut-off one.
+    ///
+    /// So it splits on line boundaries instead. Truncation is right for a single line that is
+    /// too long; for a list it just loses entries.
+    ///
+    /// EACH LINE CARRIES THE RESULTING BALANCE. A delta on its own answers "what changed" and
+    /// not "what have they got", which is the question somebody reading a money log after a
+    /// payroll dispute is actually asking - and working it out meant scrolling back through
+    /// every earlier line for that player and adding up.
+    /// </remarks>
+    public async Task PostMoneyAsync(IReadOnlyCollection<BalanceChange> changes, DateTimeOffset at, CancellationToken ct = default)
     {
-        if (changes.Count == 0) return Task.CompletedTask;
+        ArgumentNullException.ThrowIfNull(changes);
+        if (changes.Count == 0) return;
 
-        var lines = changes.Select(c =>
-            $"{(c.Delta > 0 ? "+" : "-")}{Math.Abs(c.Delta).ToString("N0", System.Globalization.CultureInfo.GetCultureInfo("en-US"))} to {Sanitize.Message(c.Player)}");
+        var lines = changes.Select(c => $"{Signed(c.Delta)} to {Sanitize.Message(c.Player)}  →  {Amount(c.Balance)}").ToList();
 
-        return PostAsync(Money, $"[{Stamp(at)}]\n{string.Join("\n", lines)}", ct);
+        /* The net across the batch, so a payroll run reads as one event rather than sixty
+           unrelated ones. Deliberately the NET and not the credits alone - a tick where the
+           payouts and a fine cancel out is worth being able to see. */
+        var net = changes.Sum(c => c.Delta);
+        lines.Add($"— {changes.Count} player(s), net {Signed(net)} —");
+
+        foreach (var message in Batch($"[{Stamp(at)}]", lines))
+            await PostAsync(Money, message, ct).ConfigureAwait(false);
+    }
+
+    private static string Amount(long value) =>
+        value.ToString("N0", System.Globalization.CultureInfo.GetCultureInfo("en-US"));
+
+    private static string Signed(long value) => (value < 0 ? "-" : "+") + Amount(Math.Abs(value));
+
+    /// <summary>
+    /// Group lines into messages that fit, keeping whole lines together.
+    /// </summary>
+    /// <remarks>
+    /// The budget is under <see cref="PostAsync"/>'s own limit rather than at it, so a batch
+    /// that fits here is never truncated there. A single line longer than the whole budget
+    /// still goes out on its own and is truncated by PostAsync - which is the right answer
+    /// for one over-long line and the wrong one for a list, which is the distinction this
+    /// whole method exists to draw.
+    /// </remarks>
+    internal static IReadOnlyList<string> Batch(string header, IReadOnlyList<string> lines)
+    {
+        ArgumentNullException.ThrowIfNull(lines);
+
+        const int Budget = 1800;
+        var messages = new List<string>();
+        var current = new StringBuilder(header);
+
+        foreach (var line in lines)
+        {
+            if (current.Length + line.Length + 1 > Budget && current.Length > header.Length)
+            {
+                messages.Add(current.ToString());
+                current = new StringBuilder(header).Append(" (cont.)");
+            }
+
+            current.Append('\n').Append(line);
+        }
+
+        if (current.Length > header.Length) messages.Add(current.ToString());
+        return messages;
     }
 
     public ValueTask DisposeAsync()
