@@ -1,4 +1,5 @@
 using PavlovBot.Core.Data;
+using PavlovBot.Core.Text;
 using PavlovBot.Host.Logs;
 using PavlovBot.Host.Rcon;
 using PavlovBot.Host.Storage;
@@ -66,7 +67,7 @@ public sealed class PlayerAutocomplete(RconRegistry rcon, IpTrackingService trac
            invisible to it - and refusing to let a moderator type one would make the command
            unusable exactly when it is needed. */
         if (choices.Count == 0 && query.Length > 0)
-            choices.Add(($"{query} (manual entry)", query));
+            choices.Add((NameLabels.Decorate(query, "manual entry"), query));
 
         return choices;
     }
@@ -74,7 +75,7 @@ public sealed class PlayerAutocomplete(RconRegistry rcon, IpTrackingService trac
     private static string Label(string name, string tag)
     {
         // Discord caps a choice label at 100 characters.
-        var label = tag.Length > 0 ? $"{name} ({tag})" : name;
+        var label = NameLabels.Decorate(name, tag);
         return label.Length > 100 ? label[..100] : label;
     }
 }

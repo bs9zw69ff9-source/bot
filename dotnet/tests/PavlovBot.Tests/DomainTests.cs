@@ -38,6 +38,35 @@ public class SanitizeTests
     }
 
     [Fact]
+    public void EveryLabelTheBotCanAddIsOneItCanTakeBackOff()
+    {
+        /* THE TEST THAT STOPS THIS DRIFTING AGAIN, and it is the whole fix. These were two
+           hand-written lists in two files: Sanitize stripped "manual entry" and "offline"
+           while the autocomplete had moved on to "online" and "recent". The two it stripped
+           were no longer produced and the two produced were not stripped - so "(online)"
+           survived, met the filter that removes brackets and spaces, and became a ban on
+           "Aliceonline", a player who does not exist. Which looks exactly like a ban that
+           worked. */
+        foreach (var label in NameLabels.All)
+            Assert.Equal("Alice", Sanitize.Id(NameLabels.Decorate("Alice", label)));
+    }
+
+    [Fact]
+    public void ANameWearingTwoLabelsLosesBoth()
+    {
+        // A name can be decorated, read off the screen, and typed into a field that
+        // decorates it again. One pass has to take all of them off.
+        Assert.Equal("Alice", Sanitize.Id("Alice (online) (manual entry)"));
+    }
+
+    [Fact]
+    public void ANameWithNoLabelIsUntouched()
+    {
+        Assert.Equal("Alice", Sanitize.Id(NameLabels.Decorate("Alice", null)));
+        Assert.Equal("Alice", Sanitize.Id(NameLabels.Decorate("Alice", "")));
+    }
+
+    [Fact]
     public void IdsAreLengthCapped()
     {
         Assert.Equal(64, Sanitize.Id(new string('a', 200)).Length);
