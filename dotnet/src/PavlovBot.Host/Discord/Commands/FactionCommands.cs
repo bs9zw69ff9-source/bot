@@ -75,6 +75,16 @@ public sealed class WhitelistCommand(RosterService rosters, FactionMembers membe
                 .WithName("add").WithDescription("Whitelist Leader - Add a member to a faction")
                 .WithType(ApplicationCommandOptionType.SubCommand)
                 .AddOption(Faction()).AddOption(Member()).AddOption(InGameName())
+                /* OPTIONAL, and named "rank" so it shares the autocomplete setrank already
+                   uses - the gateway dispatches on the focused option's name, so any
+                   subcommand with a rank field gets the right suggestions for free.
+
+                   Left out, somebody is added at the bottom of the ladder, which is what
+                   this has always done and is right for an actual recruit. Given, they land
+                   where they were hired, without a second command. */
+                .AddOption(new SlashCommandOptionBuilder()
+                    .WithName("rank").WithDescription("Start them here instead of the bottom rank")
+                    .WithType(ApplicationCommandOptionType.String).WithRequired(false).WithAutocomplete(true))
                 .AddOption("hold_ranks", ApplicationCommandOptionType.Boolean,
                     "Keep every rank at or below theirs on promotion, not just the one they hold",
                     isRequired: false))
@@ -177,6 +187,29 @@ public sealed class WhitelistCommand(RosterService rosters, FactionMembers membe
             return;
         }
 
+        /* CHECKED BEFORE ANYTHING IS WRITTEN. A bad rank found after the join would leave
+           them added at the bottom with the command reporting a failure - half done, and the
+           half that happened is the half nobody was told about. */
+        var requestedRank = (options.GetValueOrDefault("rank")?.ToString() ?? "").Trim();
+        if (requestedRank.Length > 0)
+        {
+            if (!faction.HasRanks)
+            {
+                await Reply(command, Theme.Failure($"{faction.Name} has no ranks",
+                    $"**{faction.Name}** is spawn access only - there is no ladder to start " +
+                    "anybody on. Leave the rank out.")).ConfigureAwait(false);
+                return;
+            }
+
+            if (!faction.Order.Any(r => string.Equals(r, requestedRank, StringComparison.OrdinalIgnoreCase)))
+            {
+                await Reply(command, Theme.Failure("No such rank",
+                    $"**{faction.Name}** has no rank called **{Sanitize.Code(requestedRank)}**.\n\n" +
+                    $"Its ranks are: {string.Join(", ", faction.Order.Select(r => $"**{r}**"))}.")).ConfigureAwait(false);
+                return;
+            }
+        }
+
         var result = await rosters.JoinAsync(faction, player, ct).ConfigureAwait(false);
 
         /* THE INDEX FOLLOWS THE FILE. Recorded only once the roster write succeeded, so a
@@ -202,8 +235,42 @@ public sealed class WhitelistCommand(RosterService rosters, FactionMembers membe
                 }, ct).ConfigureAwait(false);
         }
 
-        logger.LogInformation("whitelist add | member={Member} | player=\"{Player}\" | faction={Faction} | by={By} | {Outcome}",
-            member.Id, player, faction.Name, command.User.Username, result.Outcome);
+        /* AFTER THE MEMBERSHIP IS RECORDED, and that order is load-bearing. SetRankAsync
+           consults the hold-all-ranks preference through a callback that reads this index, so
+           applying the rank first would write the roster files against a flag that is not
+           saved yet - and somebody added with hold_ranks would silently get only their top
+           rank. */
+        var rank = result.Rank;
+        var moved = false;
+        if (requestedRank.Length > 0 && result.Outcome is MembershipOutcome.Allowed or MembershipOutcome.NoChange)
+        {
+            var placed = await rosters.SetRankAsync(faction, player, requestedRank, ct).ConfigureAwait(false);
+
+            /* NoChange here means they were already at the requested rank, which is a
+               success for this command even though the rank write did nothing. */
+            if (placed.Outcome is MembershipOutcome.Allowed or MembershipOutcome.NoChange)
+            {
+                rank = placed.Rank;
+                moved = placed.Outcome == MembershipOutcome.Allowed;
+            }
+            else
+            {
+                /* THE ADD STILL STOOD. Reporting only the rank failure would leave somebody
+                   on the roster believing nothing happened - and the ranks were validated
+                   above, so reaching here means the roster write itself failed. */
+                logger.LogWarning("whitelist add | player=\"{Player}\" | added to {Faction} but could not be placed at {Rank}: {Outcome}",
+                    player, faction.Name, requestedRank, placed.Outcome);
+
+                await Reply(command, MembershipReply.Fallback(placed)
+                    .AddField($"{Theme.Warn} They were still added",
+                        $"**{Sanitize.Code(player)}** is on the **{faction.Name}** roster at " +
+                        $"**{result.Rank}**. Set the rank with `/whitelist setrank`.")).ConfigureAwait(false);
+                return;
+            }
+        }
+
+        logger.LogInformation("whitelist add | member={Member} | player=\"{Player}\" | faction={Faction} | rank={Rank} | by={By} | {Outcome}",
+            member.Id, player, faction.Name, rank ?? "-", command.User.Username, result.Outcome);
 
         /* AUDITED ONLY WHEN THE ROSTER ACTUALLY CHANGED. A refusal is already answered to the
            person who ran it, and recording one as a staff action would put "added to NCR" in
@@ -214,13 +281,24 @@ public sealed class WhitelistCommand(RosterService rosters, FactionMembers membe
            EventMapping has categorised whitelist-add and whitelist-remove as Faction events
            all along, waiting for a call that was never written. Who put whom on a roster is
            exactly the question a log exists to answer. */
-        if (result.Outcome == MembershipOutcome.Allowed)
+        // Audited when the roster changed EITHER WAY - the join, or only the rank. A move on
+        // somebody already whitelisted is still somebody's rank being set by a staff member.
+        if (result.Outcome == MembershipOutcome.Allowed || moved)
         {
             await audit.RecordAsync("whitelist-add", command.User.Username, player,
-                $"{faction.Name} {result.Rank}".Trim(), ct).ConfigureAwait(false);
+                $"{faction.Name} {rank}".Trim(), ct).ConfigureAwait(false);
         }
 
-        var reply = Describe(result, player, faction);
+        /* THE RANK THEY ENDED AT, not the one the join landed on. Reporting the default
+           after placing them somewhere else is how somebody runs the command twice.
+
+           AND "NOTHING TO DO" HAS TO STOP BEING TRUE when a rank was applied. Re-running add
+           on an existing member answers NoChange for the join, and if the rank moved them
+           then something plainly did happen - saying otherwise sends somebody to check
+           whether the command is broken. */
+        var reply = moved && result.Outcome == MembershipOutcome.NoChange
+            ? Theme.Success("Whitelist updated", $"**{Sanitize.Code(player)}** — {faction.Name} **{rank}**")
+            : Describe(result with { Rank = rank }, player, faction);
         if (holdRanks && result.Outcome is MembershipOutcome.Allowed or MembershipOutcome.NoChange)
         {
             reply.AddField("Holds every rank",
