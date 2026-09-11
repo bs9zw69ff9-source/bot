@@ -568,6 +568,22 @@ public sealed class RankChangeCommand : ISlashCommand
 
     public string Name { get; }
 
+    /// <summary>Only the person who ran it sees the reply.</summary>
+    /// <remarks>
+    /// THE SAME CALL AS /whitelist, for the same reason. A rank change is admin traffic: it
+    /// names a player and what was done to them, and running a few in a row filled whatever
+    /// channel the moderator happened to be standing in. These two do exactly the work
+    /// /whitelist setrank does, and it made no sense for one to be quiet and the others loud.
+    ///
+    /// THE AUDIT TRAIL IS NOT WHAT THIS HIDES, which is the only reason it is safe. Every
+    /// change is still recorded by AuditLog and still reaches the staff log channels, so what
+    /// stops being public is the operator's own console output - not the record of it.
+    ///
+    /// BOTH DIRECTIONS, because this is one class and a demotion is if anything the one you
+    /// would rather not announce in the channel the member is reading.
+    /// </remarks>
+    public bool Ephemeral => true;
+
     public ApplicationCommandProperties Build() =>
         new SlashCommandBuilder()
             .WithName(Name)
