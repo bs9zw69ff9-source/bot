@@ -222,7 +222,8 @@ public sealed class FlushCommand(
         }
 
         var candidates = roster.Players
-            .Where(p => p.Name.Length > 0 && !masters.IsMaster(p.Name) && !masters.IsExempt(p.Name))
+            .Where(p => p.Name.Length > 0 && !masters.IsMaster(p.Name) &&
+                        !masters.IsProtected(p.Name) && !masters.IsExempt(p.Name))
             .ToList();
 
         if (candidates.Count == 0)

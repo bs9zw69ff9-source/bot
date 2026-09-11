@@ -107,6 +107,19 @@ public sealed class EvasionResponder
             return AutoBanOutcome.Master;
         }
 
+        if (_masters.IsProtected(name))
+        {
+            /* An owner has looked at this player and said no. Logged at warning because a
+               protection that keeps firing is worth seeing - it means the flag behind it is
+               still there and still catching somebody who should not be caught. */
+            _logger.LogWarning(
+                "AUTO-BAN REFUSED - {Name} is on the never-ban list (matched: {Detail})",
+                name, join.Verdict.Detail);
+            _metrics.Increment("autoban_refused_total", MetricLabels.Of("reason", "never-ban"),
+                help: "Auto-bans refused by a protection");
+            return AutoBanOutcome.Protected;
+        }
+
         if (_masters.IsExempt(name))
         {
             // They served a ban and their flags have not been swept yet.
@@ -272,6 +285,9 @@ public enum AutoBanOutcome
 
     /// <summary>Refused: a protected account.</summary>
     Master,
+
+    /// <summary>Refused: an owner put them on the never-ban list.</summary>
+    Protected,
 
     /// <summary>Skipped: they served a ban and their flags have not been swept.</summary>
     Exempt,

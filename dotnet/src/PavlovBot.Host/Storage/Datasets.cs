@@ -50,6 +50,20 @@ public static class Datasets
     public const string IgnoredNames = "ignored_names";
     public const string AutobanExempt = "autoban_exempt";
 
+    /// <summary>
+    /// Players no automated path may ever ban. Name -> when it was set.
+    /// </summary>
+    /// <remarks>
+    /// SEPARATE FROM MASTER_NAMES, deliberately. A master name is an owner's own account and
+    /// carries privileges elsewhere; this carries none. It is the answer to "this player is
+    /// being auto-banned and I cannot work out why" - an owner should be able to stop it in
+    /// one command, from Discord, without a restart and without granting anybody anything.
+    ///
+    /// It does NOT stop a human banning them. A moderator typing /ban still works, which is
+    /// the point: this turns off the machine, not the staff.
+    /// </remarks>
+    public const string NeverBan = "never_ban";
+
     /// <summary>Player -> their warnings, newest last. Escalation counts these.</summary>
     public const string Warnings = "warnings";
 
@@ -145,6 +159,7 @@ public static class Datasets
         [IpFlags] = "{}",
         [IgnoredNames] = "[]",
         [AutobanExempt] = "{}",
+        [NeverBan] = "{}",
         [Warnings] = "{}",
         [BanReconcileState] = "{}",
         [UnbanTombstones] = "{}",

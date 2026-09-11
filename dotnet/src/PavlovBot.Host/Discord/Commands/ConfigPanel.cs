@@ -54,6 +54,11 @@ public sealed class ConfigPanel(
         new("clearnames", "Clear flagged usernames", "🧹", "Stop all username auto-bans", Confirm: "CLEAR"),
         new("clearall", "Wipe ALL address data", "💥", "Registry and every flag (irreversible)", Confirm: "WIPE"),
 
+        // ── never-ban ──
+        new("neverban", "Never auto-ban a player", "🛡️", "Stop the bot banning them, and lift it now", NeedsValue: "Player name"),
+        new("allowban", "Remove never-ban", "↩️", "Let the bot auto-ban them again", NeedsValue: "Player name"),
+        new("neverbanlist", "List never-ban players", "📋", "Who the bot may never auto-ban"),
+
         // ── discord access ──
         new("baradd", "Bar a Discord user", "⛔", "Block a Discord user from ALL commands", NeedsValue: "Discord user id"),
         new("barremove", "Un-bar a Discord user", "✅", "Restore a Discord user's access", NeedsValue: "Discord user id"),
@@ -117,6 +122,7 @@ public sealed class ConfigPanel(
             m.Embed = Theme.Notice("Owner Control Panel",
                     "Pick an action. Destructive ones ask you to type a word first.\n\n" +
                     "🚫 **Enforcement** — blacklist, alts, clear flags\n" +
+                    "🛡️ **Never-ban** — stop the bot banning one player\n" +
                     "⛔ **Access** — bar / un-bar Discord users\n" +
                     "👁️ **Tracking** — ignore lists\n" +
                     "💾 **Whitelists** — save / restore\n" +
@@ -265,6 +271,10 @@ public sealed class ConfigPanel(
         "clearip" => actions.ClearAddressAsync(value, ct),
         "clearnames" => actions.ClearFlaggedNamesAsync(ct),
         "clearall" => actions.WipeAllIpDataAsync(ct),
+
+        "neverban" => actions.ProtectPlayerAsync(value, ct),
+        "allowban" => actions.UnprotectPlayerAsync(value, ct),
+        "neverbanlist" => Task.FromResult(actions.ProtectedPlayers()),
 
         "baradd" => actions.BarUserAsync(value, ct),
         "barremove" => actions.UnbarUserAsync(value, ct),

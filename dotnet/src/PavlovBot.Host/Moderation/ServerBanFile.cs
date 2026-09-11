@@ -340,7 +340,7 @@ public sealed class ServerBanFile(
            The lift rewrites the file now, so in the normal case there is nothing here to skip.
            This is the half that holds when the export failed, when BLACKLIST_PATH is
            wrong, or when somebody edits the file by hand. */
-        var lifted = store.Read(Datasets.UnbanTombstones,
+        var lifted = store.ReadMap(Datasets.UnbanTombstones,
             new Dictionary<string, DateTimeOffset>(StringComparer.OrdinalIgnoreCase));
 
         await store.UpdateAsync<List<BanRecord>>(Datasets.TempBans, [], bans =>

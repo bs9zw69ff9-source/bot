@@ -32,7 +32,9 @@ public sealed record OwnerActionResult(bool Ok, string Detail, IReadOnlyList<str
 public sealed class OwnerActions(
     SerializedStore store,
     IpTrackingService tracking,
-    string? ledgerDirectory = null)
+    string? ledgerDirectory = null,
+    MasterNames? masters = null,
+    Func<string, CancellationToken, Task>? liftBan = null)
 {
     // ---- IP enforcement -----------------------------------------------------------------
 
@@ -71,27 +73,111 @@ public sealed class OwnerActions(
             matched.Select(n => $"• **{n}**").ToList());
     }
 
+    // ---- never-ban --------------------------------------------------------------------
+
+    /// <summary>
+    /// Stop every automated path banning this player, and lift whatever is on them now.
+    /// </summary>
+    /// <remarks>
+    /// BOTH HALVES, because either on its own leaves the player locked out. Protecting them
+    /// stops the NEXT ban and does nothing about the record already written; lifting the
+    /// record without protecting them lasts until the next connection re-catches them. The
+    /// whole reason somebody reaches for this is that the loop has already started.
+    /// </remarks>
+    public async Task<OwnerActionResult> ProtectPlayerAsync(string player, CancellationToken ct = default)
+    {
+        player = (player ?? "").Trim();
+        if (player.Length == 0) return OwnerActionResult.Refused("No player name given.");
+        if (masters is null) return OwnerActionResult.Refused("The never-ban list is not available.");
+
+        await masters.ProtectAsync(player, ct).ConfigureAwait(false);
+
+        var lifted = false;
+        if (liftBan is not null)
+        {
+            try
+            {
+                await liftBan(player, ct).ConfigureAwait(false);
+                lifted = true;
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                /* The protection is written either way, and it is the half that stops this
+                   recurring. A failed lift is worth saying out loud rather than swallowing,
+                   because the player is still banned until somebody runs /unban. */
+                return OwnerActionResult.Done(
+                    $"**{player}** will never be auto-banned again. The existing ban could NOT be " +
+                    $"lifted ({ex.GetType().Name}) - run `/unban {player}` to clear it.");
+            }
+        }
+
+        return OwnerActionResult.Done(
+            $"**{player}** will never be auto-banned again - not by evasion matching, not by VPN " +
+            "screening, not by the enforcement sweep." +
+            (lifted
+                ? " Any ban on them has been lifted and their evasion flags cleared."
+                : " Run `/unban` if they are still banned.") +
+            "\n\nA moderator can still ban them by hand.");
+    }
+
+    public async Task<OwnerActionResult> UnprotectPlayerAsync(string player, CancellationToken ct = default)
+    {
+        player = (player ?? "").Trim();
+        if (player.Length == 0) return OwnerActionResult.Refused("No player name given.");
+        if (masters is null) return OwnerActionResult.Refused("The never-ban list is not available.");
+        if (!masters.IsProtected(player)) return OwnerActionResult.Done($"**{player}** was not on the never-ban list.");
+
+        await masters.UnprotectAsync(player, ct).ConfigureAwait(false);
+        return OwnerActionResult.Done($"**{player}** can be auto-banned again.");
+    }
+
+    public OwnerActionResult ProtectedPlayers()
+    {
+        if (masters is null) return OwnerActionResult.Refused("The never-ban list is not available.");
+
+        var entries = masters.Protected();
+        return entries.Count == 0
+            ? OwnerActionResult.Done("Nobody is on the never-ban list.")
+            : OwnerActionResult.List($"**{entries.Count}** player(s) can never be auto-banned.",
+                entries.OrderBy(e => e.Key, StringComparer.OrdinalIgnoreCase)
+                    .Select(e => $"✅ **{e.Key}** — since <t:{e.Value.ToUnixTimeSeconds().ToString(CultureInfo.InvariantCulture)}:R>")
+                    .ToList());
+    }
+
     public OwnerActionResult ViewBlacklist()
     {
         var flags = tracking.LoadStoredFlags();
         var lines = new List<string>();
+
 
         lines.AddRange(flags.ManualIps.Select(ip => $"🚫 address `{ip}` *(set by an owner)*"));
         lines.AddRange(flags.Ips.Select(ip => $"🚫 address `{ip}` *(from a ban)*"));
         lines.AddRange(flags.Names.Select(n => $"🚫 username **{n}**"));
         lines.AddRange(flags.Ids.Select(id => $"🚫 account `{id}`"));
 
-        /* "Nothing is blacklisted" IS A CORRECT ANSWER TO A DIFFERENT QUESTION, and on its
-           own it sent somebody looking here to explain an automatic ban away with the wrong
-           conclusion. This list is what an owner typed; the VPN screening bans on a verdict
-           nobody typed, and neither shows up in the other. Say so, but only when the list is
-           empty - under a real entry it would be noise. */
-        return lines.Count == 0
-            ? OwnerActionResult.Done(
-                "Nothing is blacklisted.\n\n" +
-                "This is only what an owner blacklisted by hand. VPN screening and the game's own " +
-                "ban list are separate - `/checkban <name>` says which one caught somebody.")
-            : OwnerActionResult.List($"**{lines.Count}** blacklist entr(ies).", lines);
+        if (lines.Count > 0) return OwnerActionResult.List($"**{lines.Count}** blacklist entr(ies).", lines);
+
+        /* EMPTY IS TWO DIFFERENT ANSWERS AND THIS USED TO GIVE ONE. An auto-ban quoted
+           "blacklisted ip 100.1.52.11" in the same minute this panel said nothing was
+           blacklisted - both read the same row, so one of them was wrong, and the panel
+           asserting "nothing" is what made that impossible to see.
+
+           A row that will not deserialize comes back as an empty StoredFlags, identical to
+           an absent one. So the RAW bytes are checked: characters on disk with nothing
+           parsed out of them is a corrupt row, and it is the only thing that explains a
+           matcher finding entries a reader cannot. */
+        var raw = (store.ReadRaw(Datasets.IpFlags) ?? "").Trim();
+        var unparsed = raw.Length > 2;
+
+        return OwnerActionResult.Done(unparsed
+            ? "**The blacklist could not be read.**\n\n" +
+              $"`{Datasets.IpFlags}` holds {raw.Length} characters that did not parse, so this list " +
+              "is empty while the matcher may still be banning on what is in there. That is a " +
+              "corrupt or foreign-format row.\n\n" +
+              "**Clear every flag** on this panel rewrites it from scratch and fixes it."
+            : "Nothing is blacklisted.\n\n" +
+              "This is only what an owner blacklisted by hand. VPN screening and the game's own " +
+              "ban list are separate - `/checkban <name>` says which one caught somebody.");
     }
 
     /// <summary>Accounts that share a CONFIRMED address with this one.</summary>

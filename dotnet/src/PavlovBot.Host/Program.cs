@@ -551,7 +551,13 @@ public static class Program
         builder.Services.AddSingleton(sp => new OwnerActions(
             sp.GetRequiredService<SerializedStore>(),
             sp.GetRequiredService<IpTrackingService>(),
-            features.LedgerDirectory));
+            features.LedgerDirectory,
+            sp.GetRequiredService<MasterNames>(),
+            /* Protecting a player LIFTS whatever is already on them - the reason anybody
+               reaches for it is that the ban has already landed. Resolved lazily inside the
+               lambda so this does not depend on registration order. */
+            liftBan: async (player, ct) =>
+                await sp.GetRequiredService<BanService>().LiftAsync(player, ct: ct).ConfigureAwait(false)));
         builder.Services.AddSingleton<ISlashCommand, InspectCommand>();
         builder.Services.AddSingleton<ISlashCommand, SetRconRolesCommand>();
         builder.Services.AddSingleton<ISlashCommand>(sp => CapsCommand.Give(
