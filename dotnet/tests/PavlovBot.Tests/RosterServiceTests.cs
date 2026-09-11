@@ -338,6 +338,79 @@ public class RosterServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task SettingARankMovesThemInOneWriteAndLeavesNoStaleEntry()
+    {
+        /* THE FAILURE THIS SHARES A CODE PATH WITH A PROMOTION TO AVOID. The file work is not
+           "remove from one, add to another" - every rank file that is not theirs is stripped,
+           because a member left in two files holds two ranks in game. */
+        await _rosters.JoinAsync(Nypd, "Alice");
+
+        var decision = await _rosters.SetRankAsync(Nypd, "Alice", "Sergeant");
+
+        Assert.True(decision.IsAllowed);
+        Assert.Equal("Sergeant", decision.Rank);
+        Assert.Contains("Alice", Contents(Nypd.RankFiles["Sergeant"]));
+        Assert.DoesNotContain("Alice", Contents("policecadet.txt"));
+        Assert.Contains("Alice", Contents(Nypd.SpawnFile));
+    }
+
+    [Fact]
+    public async Task SettingARankDownwardsStripsWhatIsNowAboveThem()
+    {
+        await _rosters.JoinAsync(Nypd, "Alice");
+        await _rosters.SetRankAsync(Nypd, "Alice", "Sergeant");
+
+        await _rosters.SetRankAsync(Nypd, "Alice", "Patrolman");
+
+        Assert.Contains("Alice", Contents("policepatrolman.txt"));
+        Assert.DoesNotContain("Alice", Contents(Nypd.RankFiles["Sergeant"]));
+    }
+
+    [Fact]
+    public async Task SettingARankTheFactionDoesNotHaveWritesNothing()
+    {
+        await _rosters.JoinAsync(Nypd, "Alice");
+
+        var decision = await _rosters.SetRankAsync(Nypd, "Alice", "Centurion");
+
+        Assert.Equal(MembershipOutcome.NoSuchRank, decision.Outcome);
+        Assert.Contains("Alice", Contents("policecadet.txt"));   // untouched
+    }
+
+    [Fact]
+    public async Task SettingARankHonoursHoldAllRanks()
+    {
+        /* THE SUBTLE HALF, and the reason this goes through the same write as a promotion
+           rather than its own. A member set to hold ranks keeps every file at or below their
+           own - each rank file is what grants its gear in game - so jumping them to Sergeant
+           has to leave them listed as Cadet and Patrolman too. A separate "remove from one,
+           add to another" implementation would have silently stripped both. */
+        var holding = new RosterService(_directory, NullLogger<RosterService>.Instance, _backups,
+            holdsAllRanks: name => string.Equals(name, "Alice", StringComparison.Ordinal));
+
+        await holding.JoinAsync(Nypd, "Alice");
+        await holding.SetRankAsync(Nypd, "Alice", "Sergeant");
+
+        foreach (var rank in Nypd.Order.TakeWhile(r => r != "Sergeant").Append("Sergeant"))
+            Assert.Contains("Alice", Contents(Nypd.RankFiles[rank]));
+
+        // And nothing above it.
+        Assert.DoesNotContain("Alice", Contents(Nypd.RankFiles[Nypd.Highest]));
+    }
+
+    [Fact]
+    public async Task SettingARankRestoresAMissingSpawnEntry()
+    {
+        // Same self-healing as a promotion, and it has to be, because this is the command
+        // somebody reaches for when the files and the records disagree.
+        Seed("policecadet.txt", "Alice");
+
+        await _rosters.SetRankAsync(Nypd, "Alice", "Sergeant");
+
+        Assert.Contains("Alice", Contents(Nypd.SpawnFile));
+    }
+
+    [Fact]
     public async Task PromotionKeepsTheMemberInTheSpawnFile()
     {
         await _rosters.JoinAsync(Nypd, "Alice");

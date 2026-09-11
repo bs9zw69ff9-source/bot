@@ -796,9 +796,21 @@ public sealed class DiscordGateway : IHostedService, IAsyncDisposable
     {
         try
         {
-            var typed = interaction.Data.Current.Value?.ToString() ?? "";
-            var choices = _autocomplete.Suggest(typed)
-                .Select(c => new AutocompleteResult(c.Name, c.Value));
+            var current = interaction.Data.Current;
+            var typed = current.Value?.ToString() ?? "";
+
+            /* DISPATCHED ON THE FOCUSED OPTION. Every autocompleted field used to get player
+               names, which is right for all of them but one: /whitelist setrank asks for a
+               rank, and offering it a list of players makes the field unusable.
+
+               The faction comes from the option BESIDE the focused one. Discord sends the
+               whole (sub)command's options with an autocomplete request, half-filled, which
+               is the only way a dependent list can be built at all. */
+            var suggestions = string.Equals(current.Name, "rank", StringComparison.Ordinal)
+                ? _autocomplete.SuggestRanks(OptionValue(interaction, "faction"), typed)
+                : _autocomplete.Suggest(typed);
+
+            var choices = suggestions.Select(c => new AutocompleteResult(c.Name, c.Value));
 
             await interaction.RespondAsync(choices).ConfigureAwait(false);
         }
@@ -811,6 +823,19 @@ public sealed class DiscordGateway : IHostedService, IAsyncDisposable
             catch (Exception) { }
         }
     }
+
+    /// <summary>
+    /// A sibling option's value from an autocomplete request.
+    /// </summary>
+    /// <remarks>
+    /// FLAT, and that is Discord.Net's doing rather than an assumption: AutocompleteOption
+    /// has no nested options at all, so a subcommand's fields arrive alongside each other
+    /// here however deeply the command nests them.
+    /// </remarks>
+    private static string? OptionValue(SocketAutocompleteInteraction interaction, string name) =>
+        interaction.Data.Options
+            .FirstOrDefault(o => string.Equals(o.Name, name, StringComparison.Ordinal))?
+            .Value?.ToString();
 
     private Task OnLog(LogMessage message)
     {

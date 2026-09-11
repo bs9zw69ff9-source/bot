@@ -476,6 +476,40 @@ public sealed class RosterService
         var decision = MembershipRules.ChangeRank(faction, membership?.Rank, direction);
         if (!decision.IsAllowed) return decision;
 
+        return await ApplyRankAsync(faction, player, decision, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Put a member at a named rank, however far that is from where they are.
+    /// </summary>
+    /// <remarks>
+    /// THROUGH THE SAME WRITE AS A PROMOTION, deliberately. The file work is not "remove from
+    /// one, add to another" - it is hold-ranks aware, it strips every rank file that is not
+    /// theirs, and it repairs a missing spawn entry on the way past. A second copy of that
+    /// would drift from this one, and the way it would show is somebody holding two ranks.
+    /// </remarks>
+    public async Task<MembershipDecision> SetRankAsync(
+        FactionDefinition faction, string player, string rank, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(faction);
+
+        // Before FindAsync, same as above: with no roster directory it finds nothing, and the
+        // rules would then answer about the member rather than about the directory.
+        if (!Enabled) return new MembershipDecision(MembershipOutcome.RosterUnavailable);
+
+        var membership = await FindAsync(player, ct).ConfigureAwait(false);
+
+        var decision = MembershipRules.SetRank(faction, membership?.Rank, rank);
+        if (!decision.IsAllowed) return decision;
+
+        return await ApplyRankAsync(faction, player, decision, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>Write an allowed rank decision to the roster files.</summary>
+    private async Task<MembershipDecision> ApplyRankAsync(
+        FactionDefinition faction, string player, MembershipDecision decision, CancellationToken ct)
+    {
+
         /* Remove from EVERY rank file that is not theirs before adding to the target.
            Removing only from their current rank leaves a stale entry behind whenever the
            storage already had them in two, and then a promotion silently gives them two

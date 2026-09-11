@@ -150,6 +150,76 @@ public class MembershipRulesTests
         Assert.Equal("Patrolman", d.Rank);
     }
 
+    // ---- setting a rank outright ----
+
+    [Fact]
+    public void ARankCanBeSetSeveralPlacesAwayInOneStep()
+    {
+        /* WHAT /promotion COULD NOT DO. Moving a Cadet to Sergeant took four runs, rewriting
+           the roster files on each one, with the member briefly holding every rank between. */
+        var d = MembershipRules.SetRank(Nypd, "Cadet", "Sergeant");
+
+        Assert.True(d.IsAllowed);
+        Assert.Equal("Sergeant", d.Rank);
+    }
+
+    [Fact]
+    public void SettingARankWorksDownwardsToo()
+    {
+        var d = MembershipRules.SetRank(Nypd, "Chief of Police", "Patrolman");
+
+        Assert.True(d.IsAllowed);
+        Assert.Equal("Patrolman", d.Rank);
+    }
+
+    [Fact]
+    public void TheTargetIsAbsolute_NotRelativeToWhereTheyWere()
+    {
+        // The same target from opposite directions lands in the same place, which is the
+        // whole difference from a promotion.
+        Assert.Equal("Sergeant", MembershipRules.SetRank(Nypd, "Cadet", "Sergeant").Rank);
+        Assert.Equal("Sergeant", MembershipRules.SetRank(Nypd, "Chief of Police", "Sergeant").Rank);
+        Assert.Equal("Sergeant", MembershipRules.SetRank(Nypd, null, "Sergeant").Rank);
+    }
+
+    [Fact]
+    public void ARankNameIsMatchedCaseInsensitivelyAndResolvedToTheRegistrysSpelling()
+    {
+        /* The name arrives from an autocomplete the moderator may have typed over, and the
+           rank FILES are keyed on the registry's casing - so the resolved spelling is what
+           has to come back or the write lands nowhere. */
+        var d = MembershipRules.SetRank(Nypd, "Cadet", "  sErGeAnT  ");
+
+        Assert.True(d.IsAllowed);
+        Assert.Equal("Sergeant", d.Rank);
+    }
+
+    [Fact]
+    public void ARankTheFactionDoesNotHaveIsRefused()
+    {
+        Assert.Equal(MembershipOutcome.NoSuchRank, MembershipRules.SetRank(Nypd, "Cadet", "Centurion").Outcome);
+        Assert.Equal(MembershipOutcome.NoSuchRank, MembershipRules.SetRank(Nypd, "Cadet", "").Outcome);
+        Assert.Equal(MembershipOutcome.NoSuchRank, MembershipRules.SetRank(Nypd, "Cadet", null).Outcome);
+    }
+
+    [Fact]
+    public void SettingTheRankTheyAlreadyHoldWritesNothing()
+    {
+        // Re-running it is the natural thing to do when somebody is unsure it took, and a
+        // no-op write would churn every rank file for nothing.
+        var d = MembershipRules.SetRank(Nypd, "Sergeant", "Sergeant");
+
+        Assert.False(d.IsAllowed);
+        Assert.Equal(MembershipOutcome.NoChange, d.Outcome);
+        Assert.Equal("Sergeant", d.Rank);
+    }
+
+    [Fact]
+    public void SettingARankOnAnUnknownFactionIsRefused()
+    {
+        Assert.Equal(MembershipOutcome.UnknownFaction, MembershipRules.SetRank(null, "Cadet", "Sergeant").Outcome);
+    }
+
     [Fact]
     public void TheLadderEndsAreRefusedRatherThanWrappingAround()
     {

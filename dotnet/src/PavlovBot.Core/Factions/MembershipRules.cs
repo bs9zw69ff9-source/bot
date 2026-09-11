@@ -20,6 +20,9 @@ public enum MembershipOutcome
     /// <summary>That faction does not define this sub-class.</summary>
     NoSuchSubclass,
 
+    /// <summary>That faction has no rank by that name.</summary>
+    NoSuchRank,
+
     /// <summary>A member may hold at most one sub-class.</summary>
     AlreadyHasSubclass,
 
@@ -103,6 +106,50 @@ public static class MembershipRules
 
         // How many are already at the destination is not consulted: ranks are uncapped.
         return MembershipDecision.Allow(faction.Order[next]);
+    }
+
+    /// <summary>
+    /// Put a member at a named rank, however far that is from where they are.
+    /// </summary>
+    /// <remarks>
+    /// THE ONE STEP AT A TIME RULE IS THE PROBLEM THIS SOLVES. /promotion and /demotion move
+    /// somebody one place, which is right for the ordinary case and useless for the two that
+    /// come up most: a recruit being placed at the rank they were actually hired into, and a
+    /// member being dropped several ranks at once. Doing either meant running the same
+    /// command four or five times, writing the roster files on every pass, with the member
+    /// briefly holding each rank in between.
+    ///
+    /// A NAMED TARGET, NOT A NUMBER OF STEPS, so the result does not depend on where they
+    /// were. Setting somebody to Sergeant leaves them Sergeant whether they were a recruit or
+    /// a lieutenant, and the caller does not have to work out a direction or a count.
+    ///
+    /// NO AUTHORITY CHECK HERE. Whether the person running this may touch this roster at all
+    /// is a Discord question and belongs at the command, which is also where the per-faction
+    /// delegation lives. This only answers whether the move is legal for the faction.
+    /// </remarks>
+    /// <param name="currentRank">Their rank now. Unknown or absent is fine - the target is absolute.</param>
+    /// <param name="targetRank">The rank to place them at. Matched case-insensitively.</param>
+    public static MembershipDecision SetRank(
+        FactionDefinition? faction,
+        string? currentRank,
+        string? targetRank)
+    {
+        if (faction is null) return new MembershipDecision(MembershipOutcome.UnknownFaction);
+        if (string.IsNullOrWhiteSpace(targetRank)) return new MembershipDecision(MembershipOutcome.NoSuchRank);
+
+        /* RESOLVED TO THE FACTION'S OWN SPELLING. The name arrives from an autocomplete the
+           moderator may have typed over, and the rank files are keyed on the registry's
+           casing - so "sergeant" has to become "Sergeant" or the write lands nowhere. */
+        var resolved = faction.Order.FirstOrDefault(r => string.Equals(r, targetRank.Trim(), StringComparison.OrdinalIgnoreCase));
+        if (resolved is null) return new MembershipDecision(MembershipOutcome.NoSuchRank);
+
+        /* ALREADY THERE IS NOT A FAILURE, and it is reported rather than written. Re-running
+           this is the natural thing to do when somebody is unsure whether it took, and a
+           no-op write would churn every rank file for nothing. */
+        if (string.Equals(currentRank, resolved, StringComparison.OrdinalIgnoreCase))
+            return new MembershipDecision(MembershipOutcome.NoChange, resolved);
+
+        return MembershipDecision.Allow(resolved);
     }
 
     /// <summary>
