@@ -378,6 +378,54 @@ public class RosterServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task JoiningThenPlacingLandsThemAtTheRankAndNowhereElse()
+    {
+        /* WHAT /whitelist add rank: DOES, in the order it does it. Joining lands somebody at
+           the bottom; the placement then has to move them and leave no trace of the rank they
+           passed through, or they hold two ranks in game. */
+        await _rosters.JoinAsync(Nypd, "Alice");
+        var placed = await _rosters.SetRankAsync(Nypd, "Alice", "Sergeant");
+
+        Assert.True(placed.IsAllowed);
+        Assert.Equal("Sergeant", placed.Rank);
+        Assert.Contains("Alice", Contents(Nypd.RankFiles["Sergeant"]));
+        Assert.DoesNotContain("Alice", Contents("policecadet.txt"));
+        Assert.Contains("Alice", Contents(Nypd.SpawnFile));
+    }
+
+    [Fact]
+    public async Task PlacingAtTheJoinRankIsANoChangeRatherThanARewrite()
+    {
+        // Asking for the bottom rank explicitly is the same as not asking, and must not be
+        // reported as a move.
+        await _rosters.JoinAsync(Nypd, "Alice");
+
+        var placed = await _rosters.SetRankAsync(Nypd, "Alice", "Cadet");
+
+        Assert.Equal(MembershipOutcome.NoChange, placed.Outcome);
+        Assert.Contains("Alice", Contents("policecadet.txt"));
+    }
+
+    [Fact]
+    public async Task PlacingHonoursHoldAllRanksSoTheOrderOfTheTwoWritesMatters()
+    {
+        /* THE ORDERING TRAP IN /whitelist add. SetRankAsync reads the hold-all-ranks
+           preference through a callback over the membership index, so the index has to be
+           written BEFORE the placement - otherwise somebody added with hold_ranks gets only
+           their top rank and the flag looks broken. This is that sequence. */
+        var recorded = false;
+        var holding = new RosterService(_directory, NullLogger<RosterService>.Instance, _backups,
+            holdsAllRanks: _ => recorded);
+
+        await holding.JoinAsync(Nypd, "Alice");
+        recorded = true;                                  // the index write the command does here
+        await holding.SetRankAsync(Nypd, "Alice", "Sergeant");
+
+        foreach (var rank in Nypd.Order.TakeWhile(r => r != "Sergeant").Append("Sergeant"))
+            Assert.Contains("Alice", Contents(Nypd.RankFiles[rank]));
+    }
+
+    [Fact]
     public async Task SettingARankHonoursHoldAllRanks()
     {
         /* THE SUBTLE HALF, and the reason this goes through the same write as a promotion
