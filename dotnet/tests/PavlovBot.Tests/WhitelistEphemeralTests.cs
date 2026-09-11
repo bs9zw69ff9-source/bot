@@ -49,10 +49,33 @@ public class WhitelistEphemeralTests
             NullLogger<WhitelistCommand>.Instance);
     }
 
+    private static RankChangeCommand Rank(bool up)
+    {
+        var store = Store();
+        return up
+            ? RankChangeCommand.Promotion(
+                new RosterService(null, NullLogger<RosterService>.Instance), new FactionMembers(store),
+                new Access(store, [], []), new AuditLog(store), NullLogger<RankChangeCommand>.Instance)
+            : RankChangeCommand.Demotion(
+                new RosterService(null, NullLogger<RosterService>.Instance), new FactionMembers(store),
+                new Access(store, [], []), new AuditLog(store), NullLogger<RankChangeCommand>.Instance);
+    }
+
     [Fact]
     public void WhitelistRepliesAreVisibleOnlyToWhoeverRanTheCommand()
     {
         Assert.True(Whitelist().Ephemeral);
+    }
+
+    [Fact]
+    public void PromotionAndDemotionAreQuietToo()
+    {
+        /* THEY DO THE WORK /whitelist setrank DOES, and it made no sense for one to be
+           private and the others to announce themselves in whatever channel the moderator
+           happened to be standing in. A demotion is if anything the one you would rather not
+           post in a channel the member is reading. */
+        Assert.True(Rank(up: true).Ephemeral);
+        Assert.True(Rank(up: false).Ephemeral);
     }
 
     /// <summary>A command that says nothing about visibility, so it gets the default.</summary>
