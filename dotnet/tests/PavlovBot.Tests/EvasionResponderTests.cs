@@ -182,6 +182,21 @@ public class EvasionResponderTests : IDisposable
     }
 
     [Fact]
+    public async Task ANeverBanPlayerIsNotBannedAndNoRecordIsWritten()
+    {
+        /* THE ESCAPE HATCH. Every other protection answers a question about why somebody was
+           caught. This one does not care - an owner has looked at it and said stop, and that
+           has to hold even when the flag behind it is still there and unexplained. */
+        await _masters.ProtectAsync("Evader");
+
+        var outcome = await _responder.RespondAsync(Join("Evader"), CancellationToken.None);
+
+        Assert.Equal(AutoBanOutcome.Protected, outcome);
+        Assert.Empty(Bans());
+        Assert.Empty(_tracking.LoadFlags().Ids);
+    }
+
+    [Fact]
     public async Task AnAccountWithNoConfirmedAddressIsStillFlaggedImmediately()
     {
         /* The deferral this replaces existed to flag an ADDRESS the tracker did not know

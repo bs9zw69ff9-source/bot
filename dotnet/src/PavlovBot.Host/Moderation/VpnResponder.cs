@@ -173,6 +173,13 @@ public sealed class VpnResponder(
             return VpnBanOutcome.Master;
         }
 
+        if (masters.IsProtected(player))
+        {
+            logger.LogWarning("VPN AUTO-BAN REFUSED - {Player} is on the never-ban list ({Reason})",
+                player, decision.Reason);
+            return VpnBanOutcome.Master;
+        }
+
         if (masters.IsExempt(player))
         {
             if (announce) logger.LogInformation("VPN auto-ban skipped - {Player} is exempt", player);

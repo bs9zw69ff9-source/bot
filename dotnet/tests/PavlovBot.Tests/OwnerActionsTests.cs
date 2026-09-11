@@ -286,6 +286,92 @@ public class OwnerActionsTests : IDisposable
         Assert.Contains("**1**", result.Detail, StringComparison.Ordinal);
     }
 
+    // ---- never-ban ----
+
+    private (OwnerActions Actions, MasterNames Masters, List<string> Lifted) WithProtection()
+    {
+        var masters = new MasterNames([], _store);
+        var lifted = new List<string>();
+        var actions = new OwnerActions(_store, _tracking, _ledgers, masters,
+            (player, _) => { lifted.Add(player); return Task.CompletedTask; });
+        return (actions, masters, lifted);
+    }
+
+    [Fact]
+    public async Task ProtectingAPlayerAlsoLiftsWhatIsAlreadyOnThem()
+    {
+        /* BOTH HALVES OR IT DOES NOTHING USEFUL. Somebody reaches for this because the ban
+           has already landed; protecting them against the NEXT one while leaving the current
+           record in place keeps them locked out and looks like the command failed. */
+        var (actions, masters, lifted) = WithProtection();
+
+        var result = await actions.ProtectPlayerAsync("Holosight1");
+
+        Assert.True(result.Ok);
+        Assert.True(masters.IsProtected("Holosight1"));
+        Assert.Equal("Holosight1", Assert.Single(lifted));
+    }
+
+    [Fact]
+    public async Task ProtectionSurvivesAFailedLiftAndSaysSo()
+    {
+        /* The protection is the half that stops this recurring, so it is written first and
+           kept. A silent "done" over a failed lift would leave them banned with nothing
+           saying why. */
+        var masters = new MasterNames([], _store);
+        var actions = new OwnerActions(_store, _tracking, _ledgers, masters,
+            (_, _) => throw new IOException("rcon down"));
+
+        var result = await actions.ProtectPlayerAsync("Holosight1");
+
+        Assert.True(masters.IsProtected("Holosight1"));
+        Assert.Contains("could NOT be lifted", result.Detail, StringComparison.Ordinal);
+        Assert.Contains("/unban", result.Detail, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ProtectionIsCaseInsensitiveAndReversible()
+    {
+        var (actions, masters, _) = WithProtection();
+
+        await actions.ProtectPlayerAsync("  Holosight1  ");
+        Assert.True(masters.IsProtected("holosight1"));
+
+        Assert.Contains("**1**", actions.ProtectedPlayers().Detail, StringComparison.Ordinal);
+
+        await actions.UnprotectPlayerAsync("HOLOSIGHT1");
+        Assert.False(masters.IsProtected("Holosight1"));
+        Assert.Contains("Nobody", actions.ProtectedPlayers().Detail, StringComparison.Ordinal);
+    }
+
+    // ---- the blacklist view ----
+
+    [Fact]
+    public async Task AnUnreadableFlagRowIsReportedAsUnreadable_NotAsEmpty()
+    {
+        /* THE SCREENSHOT THIS EXISTS FOR. An auto-ban quoted "blacklisted ip 100.1.52.11" in
+           the same minute this panel said nothing was blacklisted. Both read the same row, so
+           one was wrong - and a row that will not deserialize comes back as an empty
+           StoredFlags, identical to an absent one. Asserting "nothing is blacklisted" over it
+           is what made the contradiction impossible to see. */
+        await _store.WriteAsync(Datasets.IpFlags, new[] { "76561198000000042" });
+
+        var result = _actions.ViewBlacklist();
+
+        Assert.Contains("could not be read", result.Detail, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Nothing is blacklisted", result.Detail, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AGenuinelyEmptyFlagRowStillReadsAsEmpty()
+    {
+        // The other half: no row at all is not a fault, and must not be reported as one.
+        var result = _actions.ViewBlacklist();
+
+        Assert.Contains("Nothing is blacklisted", result.Detail, StringComparison.Ordinal);
+        Assert.DoesNotContain("could not be read", result.Detail, StringComparison.OrdinalIgnoreCase);
+    }
+
     public void Dispose()
     {
         try { Directory.Delete(_directory, recursive: true); } catch (IOException) { }

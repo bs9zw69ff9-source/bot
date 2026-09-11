@@ -46,6 +46,17 @@ public sealed class SerializedStore
 
     private SemaphoreSlim Gate(string key) => _gates.GetOrAdd(key, _ => new SemaphoreSlim(1, 1));
 
+    /// <summary>
+    /// The stored text for a key, unparsed.
+    /// </summary>
+    /// <remarks>
+    /// FOR TELLING "ABSENT" FROM "UNREADABLE", and nothing else. <see cref="Read{T}"/> maps
+    /// both to the fallback on purpose - a corrupt row must not take down every command that
+    /// touches it - but that makes a row full of unparseable text look exactly like an empty
+    /// one to anybody reporting what is stored. This is the only way to say which.
+    /// </remarks>
+    public string? ReadRaw(string key) => _backend.Read(key);
+
     /// <summary>Read a dataset, or <paramref name="fallback"/> when it is absent or unreadable.</summary>
     public T Read<T>(string key, T fallback)
     {
@@ -57,10 +68,70 @@ public sealed class SerializedStore
     }
 
     /// <summary>
+    /// Read a string-keyed dictionary, keeping the comparer the caller asked for.
+    /// </summary>
+    /// <remarks>
+    /// A SILENT BUG AT EVERY CALL SITE THAT READS ONE. They all look like this:
+    ///
+    ///     store.Read(Datasets.AutobanExempt,
+    ///         new Dictionary&lt;string, DateTimeOffset&gt;(StringComparer.OrdinalIgnoreCase))
+    ///
+    /// and that comparer only ever applied when the row was ABSENT. JSON carries no
+    /// comparer, so the moment the row existed the deserializer handed back an ORDINAL
+    /// dictionary and every lookup became case-sensitive - no error, no log line, and
+    /// behaviour that changed the first time somebody saved something.
+    ///
+    /// It matters most where it shows least. IsExempt is one of the four protections between
+    /// a player and an automatic permanent ban and it looks an in-game name up in one of
+    /// these. An unban tombstone is keyed on what staff typed and matched against what the
+    /// ban file spells. Neither fails loudly; both just stop protecting.
+    ///
+    /// A SEPARATE NAME rather than an overload of Read: overload resolution between two
+    /// generic methods is ambiguous here, not more-specific, so the compiler rejects it. It
+    /// therefore has to be called deliberately, and it is - at every site on the enforcement
+    /// path. The rest of the codebase still reads dictionaries the old way; those hold
+    /// warnings, arrests, playtime and the like, where a case mismatch is a wrong number
+    /// rather than a wrongful ban.
+    /// </remarks>
+    public Dictionary<string, TValue> ReadMap<TValue>(string key, Dictionary<string, TValue> fallback)
+    {
+        ArgumentNullException.ThrowIfNull(fallback);
+
+        var json = _backend.Read(key);
+        if (string.IsNullOrWhiteSpace(json)) return fallback;
+
+        return _codec.TryDeserialize<Dictionary<string, TValue>>(json, out var value) && value is not null
+            ? new Dictionary<string, TValue>(value, fallback.Comparer)
+            : fallback;
+    }
+
+
+    /// <summary>
     /// Apply <paramref name="mutate"/> to the current value and persist the result.
     /// Serialised against every other update to the same key.
     /// </summary>
     /// <returns>The value that was written, or the unchanged value if the mutator vetoed.</returns>
+    /// <summary>
+    /// Read-modify-write a string-keyed dictionary, keeping the caller's comparer.
+    /// </summary>
+    /// <remarks>
+    /// The write half of the same bug. Without this the mutator is handed an ORDINAL
+    /// dictionary, so <c>map[name] = value</c> adds a second entry differing only in case
+    /// rather than replacing the first, and <c>Remove</c> misses.
+    /// </remarks>
+    public Task<UpdateResult<Dictionary<string, TValue>>> UpdateMapAsync<TValue>(
+        string key,
+        Dictionary<string, TValue> fallback,
+        Func<Dictionary<string, TValue>, Dictionary<string, TValue>?> mutate,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(fallback);
+        ArgumentNullException.ThrowIfNull(mutate);
+
+        return UpdateAsync<Dictionary<string, TValue>>(key, fallback,
+            current => mutate(new Dictionary<string, TValue>(current, fallback.Comparer)), ct);
+    }
+
     public async Task<UpdateResult<T>> UpdateAsync<T>(
         string key, T fallback, Func<T, T?> mutate, CancellationToken ct = default)
     {

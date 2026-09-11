@@ -43,11 +43,40 @@ public sealed class MasterNames : IMasterNames
         return _masters.Contains(trimmed);
     }
 
+    /// <summary>
+    /// A player an owner has said must never be auto-banned.
+    /// </summary>
+    /// <remarks>
+    /// THE ESCAPE HATCH FOR A FALSE POSITIVE NOBODY CAN EXPLAIN. Every other protection here
+    /// answers a question about WHY somebody was caught - a master account, a served ban.
+    /// This one does not care: the owner has looked at it, decided the machine is wrong, and
+    /// said stop. That has to work even when the evidence trail is unreadable, because a
+    /// player sitting locked out is not a good reason to keep debugging.
+    ///
+    /// Checked at exactly the same points as <see cref="IsMaster"/>, and nowhere else - it
+    /// grants no privileges and changes nothing a human can do.
+    /// </remarks>
+    public bool IsProtected(string name) => Protected().ContainsKey(name.Trim());
+
+    /// <summary>Every protected player, with when the protection was set.</summary>
+    public IReadOnlyDictionary<string, DateTimeOffset> Protected() =>
+        _store.ReadMap(Datasets.NeverBan, new Dictionary<string, DateTimeOffset>(StringComparer.OrdinalIgnoreCase));
+
+    public Task ProtectAsync(string name, CancellationToken ct = default) =>
+        _store.UpdateMapAsync(Datasets.NeverBan,
+            new Dictionary<string, DateTimeOffset>(StringComparer.OrdinalIgnoreCase),
+            protectedNames => { protectedNames[name.Trim()] = DateTimeOffset.UtcNow; return protectedNames; }, ct);
+
+    public Task UnprotectAsync(string name, CancellationToken ct = default) =>
+        _store.UpdateMapAsync(Datasets.NeverBan,
+            new Dictionary<string, DateTimeOffset>(StringComparer.OrdinalIgnoreCase),
+            protectedNames => { protectedNames.Remove(name.Trim()); return protectedNames; }, ct);
+
     public bool IsExempt(string name) =>
         Exemptions().TryGetValue(name.Trim(), out var until) && until > DateTimeOffset.UtcNow;
 
     private Dictionary<string, DateTimeOffset> Exemptions() =>
-        _store.Read(Datasets.AutobanExempt, new Dictionary<string, DateTimeOffset>(StringComparer.OrdinalIgnoreCase));
+        _store.ReadMap(Datasets.AutobanExempt, new Dictionary<string, DateTimeOffset>(StringComparer.OrdinalIgnoreCase));
 
     /// <summary>
     /// Exempt a player from auto-ban re-catching.
@@ -58,7 +87,7 @@ public sealed class MasterNames : IMasterNames
     /// is generous.
     /// </param>
     public Task ExemptAsync(string name, TimeSpan? duration = null, CancellationToken ct = default) =>
-        _store.UpdateAsync(Datasets.AutobanExempt,
+        _store.UpdateMapAsync(Datasets.AutobanExempt,
             new Dictionary<string, DateTimeOffset>(StringComparer.OrdinalIgnoreCase),
             exemptions =>
             {
@@ -68,7 +97,7 @@ public sealed class MasterNames : IMasterNames
 
     /// <summary>Drop an exemption. A DELIBERATE ban clears one - that is the point of it.</summary>
     public Task RemoveExemptionAsync(string name, CancellationToken ct = default) =>
-        _store.UpdateAsync(Datasets.AutobanExempt,
+        _store.UpdateMapAsync(Datasets.AutobanExempt,
             new Dictionary<string, DateTimeOffset>(StringComparer.OrdinalIgnoreCase),
             exemptions => { exemptions.Remove(name.Trim()); return exemptions; }, ct);
 

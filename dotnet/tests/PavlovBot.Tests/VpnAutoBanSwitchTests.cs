@@ -39,6 +39,7 @@ public class VpnAutoBanSwitchTests : IAsyncDisposable
     {
         public bool IsMaster(string name) => false;
         public bool IsExempt(string name) => false;
+        public bool IsProtected(string name) => false;
         public Task ExemptAsync(string name, TimeSpan? duration = null, CancellationToken ct = default) =>
             Task.CompletedTask;
     }

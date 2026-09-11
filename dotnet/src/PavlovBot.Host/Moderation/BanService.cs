@@ -272,7 +272,11 @@ public sealed class BanService
             {
                 var name = player.Name;
                 if (name.Length == 0) continue;
-                if (_masterNames.IsMaster(name) || _masterNames.IsExempt(name)) continue;
+                if (_masterNames.IsMaster(name) || _masterNames.IsProtected(name) ||
+                    _masterNames.IsExempt(name))
+                {
+                    continue;
+                }
                 if (!handled.Add(name)) continue;
                 if (!banned.Contains(name)) continue;
 
@@ -328,7 +332,11 @@ public sealed class BanService
             ct.ThrowIfCancellationRequested();
 
             var name = Sanitize.Id(ban.PlayerId);
-            if (name.Length == 0 || _masterNames.IsMaster(ban.PlayerId) || _masterNames.IsExempt(ban.PlayerId)) continue;
+            if (name.Length == 0 || _masterNames.IsMaster(ban.PlayerId) ||
+                _masterNames.IsProtected(ban.PlayerId) || _masterNames.IsExempt(ban.PlayerId))
+            {
+                continue;
+            }
 
             // Re-verify at ISSUE time, not from the snapshot. See the remarks.
             var stillBanned = ActiveBans().Any(b => BanRules.SamePlayer(b.PlayerId, ban.PlayerId));
@@ -446,7 +454,7 @@ public sealed class BanService
 
              THE EXPORT stops the GAME banning them. The server reads that file itself, so a
              player left listed in it stays banned however many Unban commands RCON accepts. */
-        await _store.UpdateAsync(Datasets.UnbanTombstones,
+        await _store.UpdateMapAsync(Datasets.UnbanTombstones,
             new Dictionary<string, DateTimeOffset>(StringComparer.OrdinalIgnoreCase),
             tombstones => { tombstones[name.Trim()] = Now; return tombstones; }, ct).ConfigureAwait(false);
 
@@ -518,6 +526,17 @@ public interface IMasterNames
 {
     bool IsMaster(string name);
     bool IsExempt(string name);
+
+    /// <summary>
+    /// A player an owner has told the bot never to auto-ban.
+    /// </summary>
+    /// <remarks>
+    /// ON THE INTERFACE so no enforcement path can consult IsMaster and quietly miss this
+    /// one. The sweep, the reconcile, the evasion responder and the VPN responder all take
+    /// IMasterNames and all four have to honour it, or the protection holds in three places
+    /// and the fourth bans them anyway a few minutes later.
+    /// </remarks>
+    bool IsProtected(string name);
 
     /// <summary>Protect a player from auto-ban re-catching for a while.</summary>
     /// <remarks>

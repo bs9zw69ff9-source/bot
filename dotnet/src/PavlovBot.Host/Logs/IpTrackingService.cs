@@ -437,7 +437,7 @@ public sealed class IpTrackingService : PavlovBot.Host.Moderation.IBanEvidence
 
     private async Task ResolvePendingFlagAsync(string accountId, string ip, DateTimeOffset at, CancellationToken ct)
     {
-        var pending = _store.Read(Datasets.AutobanExempt + "_pending",
+        var pending = _store.ReadMap(Datasets.AutobanExempt + "_pending",
             new Dictionary<string, PendingFlag>(StringComparer.OrdinalIgnoreCase));
 
         if (!pending.TryGetValue(accountId, out var request)) return;
@@ -445,13 +445,13 @@ public sealed class IpTrackingService : PavlovBot.Host.Moderation.IBanEvidence
         if (!request.IsLive(at, PendingFlagWindow))
         {
             // Too late: after a few minutes, any disconnect is somebody else's.
-            await _store.UpdateAsync(Datasets.AutobanExempt + "_pending", pending,
+            await _store.UpdateMapAsync(Datasets.AutobanExempt + "_pending", pending,
                 p => { p.Remove(accountId); return p; }, ct).ConfigureAwait(false);
             return;
         }
 
         await ApplyFlagsAsync([ip], request.FlagAccountId ? [accountId] : [], ct).ConfigureAwait(false);
-        await _store.UpdateAsync(Datasets.AutobanExempt + "_pending", pending,
+        await _store.UpdateMapAsync(Datasets.AutobanExempt + "_pending", pending,
             p => { p.Remove(accountId); return p; }, ct).ConfigureAwait(false);
 
         _logger.LogInformation("Pending flag resolved for {Id}: {Ip} confirmed and flagged", accountId, ip);
@@ -484,7 +484,7 @@ public sealed class IpTrackingService : PavlovBot.Host.Moderation.IBanEvidence
             flags.ManualIps), ct).ConfigureAwait(false);
 
         // Also drop any pending intent, or a later disconnect would re-flag them.
-        await _store.UpdateAsync(Datasets.AutobanExempt + "_pending",
+        await _store.UpdateMapAsync(Datasets.AutobanExempt + "_pending",
             new Dictionary<string, PendingFlag>(StringComparer.OrdinalIgnoreCase),
             pending => { pending.Remove(accountId); return pending; }, ct).ConfigureAwait(false);
 

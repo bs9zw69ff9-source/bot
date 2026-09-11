@@ -143,6 +143,62 @@ public class SerializedStoreTests
         Assert.Same(fast, done);   // it did not wait on the other dataset
         Assert.Single(store.Read("playtime", new List<string>()));
     }
+
+    // ---- the comparer a stored dictionary comes back with ----
+
+    [Fact]
+    public async Task PlainReadLosesTheCaseInsensitiveComparer()
+    {
+        /* PINNED AS THE BUG IT IS, not as intended behaviour. Every caller writes
+           `new Dictionary<string, T>(StringComparer.OrdinalIgnoreCase)` as the fallback and
+           that comparer applies ONLY when the row is absent - JSON carries no comparer. The
+           moment something is saved, lookups go case-sensitive, silently.
+
+           This test exists so the next person to find a case-sensitivity bug can see in one
+           place why, instead of rediscovering it from a wrongful ban. */
+        var store = NewStore(out _);
+
+        await store.UpdateAsync("exempt", new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase),
+            map => { map["Holosight1"] = 1; return map; });
+
+        var read = store.Read("exempt", new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase));
+
+        Assert.True(read.ContainsKey("Holosight1"));
+        Assert.False(read.ContainsKey("holosight1"));   // the bug
+    }
+
+    [Fact]
+    public async Task ReadMapKeepsTheComparerTheCallerAskedFor()
+    {
+        var store = NewStore(out _);
+
+        await store.UpdateMapAsync("exempt", new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase),
+            map => { map["Holosight1"] = 1; return map; });
+
+        var read = store.ReadMap("exempt", new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase));
+
+        Assert.True(read.ContainsKey("holosight1"));
+        Assert.True(read.ContainsKey("HOLOSIGHT1"));
+    }
+
+    [Fact]
+    public async Task UpdateMapReplacesAnEntryRatherThanAddingACaseVariant()
+    {
+        /* The write half. Handed an ordinal dictionary, `map[name] = value` adds a SECOND
+           entry differing only in case, and Remove misses - so an exemption granted as
+           "Holosight1" is never cleared by an unban filed as "holosight1". */
+        var store = NewStore(out _);
+        var fallback = () => new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+
+        await store.UpdateMapAsync("exempt", fallback(), map => { map["Holosight1"] = 1; return map; });
+        await store.UpdateMapAsync("exempt", fallback(), map => { map["holosight1"] = 2; return map; });
+
+        var read = store.ReadMap("exempt", fallback());
+        Assert.Equal(2, Assert.Single(read).Value);
+
+        await store.UpdateMapAsync("exempt", fallback(), map => { map.Remove("HOLOSIGHT1"); return map; });
+        Assert.Empty(store.ReadMap("exempt", fallback()));
+    }
 }
 
 /// <summary>
