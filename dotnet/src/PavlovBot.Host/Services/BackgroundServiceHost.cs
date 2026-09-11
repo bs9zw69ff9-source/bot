@@ -37,6 +37,7 @@ public sealed class BackgroundServiceHost : IHostedService
     private readonly BanService _bans;
     private readonly MasterNames _masters;
     private readonly MoneyLog _moneyLog;
+    private readonly StatsLogService _statsLog;
     private readonly SqliteKeyValueBackend _backend;
     private readonly Boards _boards;
     private readonly AutoPost _autoPost;
@@ -79,6 +80,7 @@ public sealed class BackgroundServiceHost : IHostedService
         BanService bans,
         MasterNames masters,
         MoneyLog moneyLog,
+        StatsLogService statsLog,
         SqliteKeyValueBackend backend,
         Boards boards,
         AutoPost autoPost,
@@ -115,6 +117,7 @@ public sealed class BackgroundServiceHost : IHostedService
         _bans = bans;
         _masters = masters;
         _moneyLog = moneyLog;
+        _statsLog = statsLog;
         _backend = backend;
         _boards = boards;
         _autoPost = autoPost;
@@ -215,6 +218,20 @@ public sealed class BackgroundServiceHost : IHostedService
                             }
                         }
                 },
+            });
+        }
+
+        /* ---- stats log ----
+           The same cadence as the main tail. It is the same kind of work against a file the
+           same server is writing, and a kill feed running a different interval to the join
+           feed puts the two out of order in a channel where they are read together. */
+        if (_statsLog.Enabled)
+        {
+            _registry.Register(new ServiceDefinition
+            {
+                Name = "stats-log",
+                Interval = _features.LogPollInterval,
+                Tick = ct => _statsLog.TickAsync(ct),
             });
         }
 

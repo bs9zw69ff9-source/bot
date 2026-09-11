@@ -312,14 +312,46 @@ public sealed class FeedWebhooks : IAsyncDisposable
     public Task PostStaffAsync(string action, string moderator, string target, string? reason, DateTimeOffset at, CancellationToken ct = default) =>
         PostAsync(Staff, StaffLine(action, moderator, target, reason, at), ct);
 
-    public Task PostKillAsync(string? killer, string killed, string? weapon, DateTimeOffset at, CancellationToken ct = default)
+    public Task PostKillAsync(string? killer, string killed, string? weapon, DateTimeOffset at,
+        bool headshot = false, CancellationToken ct = default) =>
+        PostAsync(Kill, KillLine(killer, killed, weapon, at, headshot), ct);
+
+    /// <summary>
+    /// One kill, as the feed shows it.
+    /// </summary>
+    /// <remarks>
+    /// A SUICIDE IS NOT AN ARROW. Stats.log records one as killer and killed being the same
+    /// person, which rendered as "Name → Name" and reads like a parser fault every time.
+    /// Pavlov files a fall or a drowning the same way with no weapon, so those two are told
+    /// apart by whether a weapon was named.
+    ///
+    /// The headshot flag only exists at all because this comes from Stats.log - Pavlov.log's
+    /// verbose kill output does not carry it.
+    /// </remarks>
+    public static string KillLine(string? killer, string killed, string? weapon, DateTimeOffset at, bool headshot = false)
     {
-        // A kill with no killer is the world - fall damage, an unowned explosion. Naming it
-        // "unknown" reads as a bug; naming it "the world" reads as what happened.
+        var who = Sanitize.Message(killed);
+        var with = weapon is { Length: > 0 } w ? Sanitize.Message(w) : null;
+        var detail = (with, headshot) switch
+        {
+            ({ } named, true) => $"  ({named}, headshot)",
+            ({ } named, false) => $"  ({named})",
+            (null, true) => "  (headshot)",
+            (null, false) => "",
+        };
+
+        if (killer is { Length: > 0 } && string.Equals(killer, killed, StringComparison.Ordinal))
+        {
+            // No weapon on a self-kill is the world doing it: a fall, a drown, the map.
+            return with is null
+                ? $"[{Stamp(at)}] KILL  {who} died"
+                : $"[{Stamp(at)}] KILL  {who} killed themselves{detail}";
+        }
+
+        // A kill with no killer is the world - an unowned explosion. Naming it "unknown"
+        // reads as a bug; naming it "the world" reads as what happened.
         var by = string.IsNullOrEmpty(killer) ? "the world" : Sanitize.Message(killer);
-        var line = $"[{Stamp(at)}] KILL  {by} → {Sanitize.Message(killed)}";
-        if (weapon is { Length: > 0 }) line += $"  ({Sanitize.Message(weapon)})";
-        return PostAsync(Kill, line, ct);
+        return $"[{Stamp(at)}] KILL  {by} → {who}{detail}";
     }
 
     /// <summary>
