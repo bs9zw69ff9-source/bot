@@ -185,6 +185,31 @@ public sealed class RconRegistry : IAsyncDisposable, IOnlineRoster
         foreach (var client in _clients.Values) client.InvalidateReads();
     }
 
+    /// <summary>
+    /// The display name behind a unique id, from the live rosters.
+    /// </summary>
+    /// <remarks>
+    /// THE BEST SOURCE FOR A KILL, because both players were online when it happened - the
+    /// roster that is refreshed on a timer has them both by definition. The persistent
+    /// registry is the fallback for somebody who has since left, and it only knows the names
+    /// it has seen logged.
+    /// </remarks>
+    public string? NameForId(string? uniqueId)
+    {
+        if (string.IsNullOrWhiteSpace(uniqueId)) return null;
+
+        foreach (var roster in _rosters.Values)
+        {
+            foreach (var player in roster.Players)
+            {
+                if (player.Name.Length > 0 && string.Equals(player.UniqueId, uniqueId, StringComparison.OrdinalIgnoreCase))
+                    return player.Name;
+            }
+        }
+
+        return null;
+    }
+
     /// <summary>Every distinct player name across every server.</summary>
     public IReadOnlyList<string> AllOnlinePlayers() =>
         _rosters.Values

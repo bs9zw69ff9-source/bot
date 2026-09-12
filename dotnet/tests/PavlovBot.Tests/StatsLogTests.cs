@@ -1,3 +1,6 @@
+using Microsoft.Extensions.Logging.Abstractions;
+using PavlovBot.Host.Logs;
+using PavlovBot.Host.Observability;
 using PavlovBot.Core.Logs;
 using PavlovBot.Host.Discord;
 using Xunit;
@@ -207,6 +210,120 @@ public class StatsLogReaderTests
     public void LinesOutsideABlockAreIgnored()
     {
         Assert.Empty(ReadAll("some other log line\n\t\"Killer\": \"Nobody\"\n}\n"));
+    }
+}
+
+/// <summary>
+/// Turning what Stats.log writes into a name somebody can read.
+/// </summary>
+/// <remarks>
+/// The kill feed went out as a wall of seventeen-digit numbers shooting other seventeen-digit
+/// numbers. Stats.log records the UNIQUE ID in the Killer and Killed fields, and nothing
+/// resolved it - the same gap the ban-file importer already had.
+/// </remarks>
+public class StatsKillNameTests : IDisposable
+{
+    private readonly string _directory = Path.Combine(Path.GetTempPath(), "pavlovbot-statsname-" + Guid.NewGuid().ToString("N"));
+    private readonly string _path;
+
+    public StatsKillNameTests()
+    {
+        Directory.CreateDirectory(_directory);
+        _path = Path.Combine(_directory, "Stats.log");
+        File.WriteAllText(_path, "");
+    }
+
+    private static string Block(string killer, string killed) =>
+        $"[2026.09.12-03.50.32] StatManagerLog: {{\n" +
+        "\t\"KillData\":\n\t{\n" +
+        $"\t\t\"Killer\": \"{killer}\",\n" +
+        $"\t\t\"Killed\": \"{killed}\",\n" +
+        "\t\t\"KilledBy\": \"lightmachinegun\",\n" +
+        "\t\t\"Headshot\": true\n" +
+        "\t}\n}\n";
+
+    private async Task<List<StatsKill>> ReadAsync(string contents, Func<string, string?>? resolve)
+    {
+        var service = new StatsLogService([_path],
+            new LogTailer(NullLogger.Instance), new MetricsRegistry(),
+            NullLogger<StatsLogService>.Instance, resolve);
+
+        var seen = new List<StatsKill>();
+        service.Killed += kill => { seen.Add(kill); return Task.CompletedTask; };
+
+        // The tailer positions at the END on its first pass, so the content has to arrive
+        // after it - which is also how a live server writes it.
+        await service.TickAsync();
+        await File.AppendAllTextAsync(_path, contents);
+        await service.TickAsync();
+
+        return seen;
+    }
+
+    [Fact]
+    public async Task AUniqueIdBecomesTheDisplayName()
+    {
+        /* THE BUG. Both fields carried a seventeen-digit id straight into the feed, so the
+           channel read "27475864022060194 -> 9096592833787397" and told a moderator nothing
+           about who had done what. */
+        var names = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["27475864022060194"] = "Holosight1",
+            ["9096592833787397"] = "LxPXHam",
+        };
+
+        var kill = Assert.Single(await ReadAsync(
+            Block("27475864022060194", "9096592833787397"), id => names.GetValueOrDefault(id)));
+
+        Assert.Equal("Holosight1", kill.Killer);
+        Assert.Equal("LxPXHam", kill.Killed);
+        Assert.True(kill.Headshot);
+    }
+
+    [Fact]
+    public async Task AnIdNobodyCanNameIsLeftAsTheId()
+    {
+        /* NOT REPLACED WITH "unknown". An id nobody can name is still the only handle
+           anybody has on that player, and a feed line naming nobody is worse than an ugly
+           one naming a number. */
+        var kill = Assert.Single(await ReadAsync(Block("27475864022060194", "9096592833787397"), _ => null));
+
+        Assert.Equal("27475864022060194", kill.Killer);
+        Assert.Equal("9096592833787397", kill.Killed);
+    }
+
+    [Fact]
+    public async Task AFieldThatAlreadyHoldsANameIsPassedThrough()
+    {
+        // The field is not always an id, so resolution has to be a lookup that may miss
+        // rather than a conversion that must succeed.
+        var kill = Assert.Single(await ReadAsync(Block("Holosight1", "LxPXHam"), _ => null));
+
+        Assert.Equal("Holosight1", kill.Killer);
+        Assert.Equal("LxPXHam", kill.Killed);
+    }
+
+    [Fact]
+    public async Task AResolverThatThrowsDoesNotCostTheKill()
+    {
+        var kill = Assert.Single(await ReadAsync(
+            Block("27475864022060194", "9096592833787397"), _ => throw new InvalidOperationException("rcon down")));
+
+        Assert.Equal("27475864022060194", kill.Killer);
+    }
+
+    [Fact]
+    public async Task WithNoResolverTheRawFieldsSurvive()
+    {
+        var kill = Assert.Single(await ReadAsync(Block("27475864022060194", "9096592833787397"), resolve: null));
+
+        Assert.Equal("27475864022060194", kill.Killer);
+    }
+
+    public void Dispose()
+    {
+        GC.SuppressFinalize(this);
+        try { Directory.Delete(_directory, recursive: true); } catch (IOException) { }
     }
 }
 

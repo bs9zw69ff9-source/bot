@@ -318,7 +318,15 @@ public static class Program
                 sp.GetRequiredService<ILogger<StatsLogService>>()),
             sp.GetRequiredService<LogTailer>(),
             sp.GetRequiredService<MetricsRegistry>(),
-            sp.GetRequiredService<ILogger<StatsLogService>>()));
+            sp.GetRequiredService<ILogger<StatsLogService>>(),
+            /* THE LIVE ROSTER FIRST, then the persistent registry. Both players in a kill were
+               online when it happened, so the roster has them by definition and has the name
+               they are using right now; the registry is the fallback for one who left before
+               the line was read. Resolved lazily inside the lambda so this does not depend on
+               registration order. */
+            resolveName: id =>
+                sp.GetRequiredService<RconRegistry>().NameForId(id)
+                ?? sp.GetRequiredService<IpTrackingService>().Account(id)?.Names.FirstOrDefault()));
         builder.Services.AddSingleton<EvasionResponder>();
         /* Acts on a VPN verdict. Without it the screening ran on every connection, decided
            a ban, and nothing read the decision. */
