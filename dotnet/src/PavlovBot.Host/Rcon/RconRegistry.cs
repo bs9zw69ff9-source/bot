@@ -257,7 +257,14 @@ public sealed class RconRegistry : IAsyncDisposable, IOnlineRoster
                        read it, decided it could not use it, and threw it away. Three servers
                        failing identically then looked like a bot fault rather than something
                        the servers were saying out loud. */
+                    /* AND DROP THE SESSION. A reply that arrived and made no sense leaves a
+                       connection the layer below has no reason to suspect - the exchange
+                       completed - so the same useless answer comes back on every tick and the
+                       roster ages out while this line repeats unchanged. Resetting costs a
+                       handshake on a path that is already failing, and it is the difference
+                       between a blip and being stuck. */
                     Problem(server, $"the server's reply to RefreshList was not JSON: {Excerpt(raw)}");
+                    await ResetAsync(server, ct).ConfigureAwait(false);
                     continue;
                 }
 
@@ -270,6 +277,7 @@ public sealed class RconRegistry : IAsyncDisposable, IOnlineRoster
                     if (RconReply.Successful(document.RootElement) != true)
                     {
                         Problem(server, "the server refused RefreshList");
+                        await ResetAsync(server, ct).ConfigureAwait(false);
                         continue;
                     }
 
@@ -285,6 +293,26 @@ public sealed class RconRegistry : IAsyncDisposable, IOnlineRoster
             {
                 Problem(server, ex.Message);
             }
+        }
+    }
+
+    /// <summary>Drop a server's session, swallowing anything that goes wrong doing it.</summary>
+    /// <remarks>
+    /// The refresh has already failed and been reported. A reset that itself throws must not
+    /// replace that report with a less useful one, or turn a stale roster into a missing tick
+    /// for every server after this one in the loop.
+    /// </remarks>
+    private async Task ResetAsync(string server, CancellationToken ct)
+    {
+        if (!_clients.TryGetValue(server, out var client)) return;
+
+        try
+        {
+            await client.ResetSessionAsync(ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogDebug(ex, "Could not reset the {Server} session after an unusable reply", server);
         }
     }
 
