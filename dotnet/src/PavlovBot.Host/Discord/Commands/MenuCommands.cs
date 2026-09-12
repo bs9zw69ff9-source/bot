@@ -96,7 +96,7 @@ public sealed class GiveMenuCommand(
             case MenuClaimAction.Release:
                 await SetGrantAsync(selfId, null, ct).ConfigureAwait(false);
                 foreach (var server in rcon.Servers)
-                    foreach (var line in RconMenu.Revoke(requested, wasHighStaff: true))
+                    foreach (var line in RconMenu.Revoke(rcon.TargetForName(requested), wasHighStaff: true))
                         await TrySend(server, line, ct).ConfigureAwait(false);
 
                 logger.LogInformation("stripmenu | member={Member} | player=\"{Player}\" | by={By}",
@@ -107,7 +107,9 @@ public sealed class GiveMenuCommand(
                 return;
         }
 
-        var commands = RconMenu.Grant(requested, tier);
+        // THE PLATFORM ID, not the name: the server targets players by it, and a menu
+        // command naming anything else is accepted and grants nothing.
+        var commands = RconMenu.Grant(rcon.TargetForName(requested), tier);
 
         var delivered = 0;
         foreach (var server in rcon.Servers)
