@@ -405,7 +405,10 @@ public sealed class InspectCommand(
         }
 
         var player = Sanitize.Id(command.Data.Options.First().Value as string ?? "");
-        var account = tracking.AccountByName(player);
+
+        // Name, EOS id or platform id - see IpTrackingService.Resolve. This is the command
+        // somebody reaches for holding an identifier they cannot place.
+        var account = tracking.Resolve(player);
 
         var embed = Theme.Notice($"Inspect — {Sanitize.Code(player)}");
 
