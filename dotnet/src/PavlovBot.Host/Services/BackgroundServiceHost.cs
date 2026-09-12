@@ -36,8 +36,6 @@ public sealed class BackgroundServiceHost : IHostedService
     private readonly IpTrackingService _tracking;
     private readonly BanService _bans;
     private readonly MasterNames _masters;
-    private readonly MoneyLog _moneyLog;
-    private readonly StatsLogService _statsLog;
     private readonly SqliteKeyValueBackend _backend;
     private readonly Boards _boards;
     private readonly AutoPost _autoPost;
@@ -56,7 +54,6 @@ public sealed class BackgroundServiceHost : IHostedService
     private readonly PavlovBot.Host.Verification.VerificationService _verification;
     private readonly PavlovBot.Host.Discord.Commands.MenuPanel _menuPanel;
     private readonly PavlovBot.Host.Economy.Payroll _payroll;
-    private readonly PavlovBot.Host.Economy.MoneyAnomalyDetector _moneyAlerts;
     private readonly PavlovBot.Host.Servers.CrashRecovery _crashRecovery;
     private readonly PavlovBot.Host.Moderation.AuditLog _audit;
     private readonly PavlovBot.Host.Events.IEventStore _events;
@@ -79,8 +76,6 @@ public sealed class BackgroundServiceHost : IHostedService
         IpTrackingService tracking,
         BanService bans,
         MasterNames masters,
-        MoneyLog moneyLog,
-        StatsLogService statsLog,
         SqliteKeyValueBackend backend,
         Boards boards,
         AutoPost autoPost,
@@ -93,7 +88,6 @@ public sealed class BackgroundServiceHost : IHostedService
         PavlovBot.Host.Verification.VerificationService verification,
         PavlovBot.Host.Discord.Commands.MenuPanel menuPanel,
         PavlovBot.Host.Economy.Payroll payroll,
-        PavlovBot.Host.Economy.MoneyAnomalyDetector moneyAlerts,
         PavlovBot.Host.Servers.CrashRecovery crashRecovery,
         PavlovBot.Host.Moderation.AuditLog audit,
         PavlovBot.Host.Events.IEventStore events,
@@ -101,7 +95,6 @@ public sealed class BackgroundServiceHost : IHostedService
         ILogger<BackgroundServiceHost> logger)
     {
         _payroll = payroll;
-        _moneyAlerts = moneyAlerts;
         _crashRecovery = crashRecovery;
         _audit = audit;
         _events = events;
@@ -116,8 +109,6 @@ public sealed class BackgroundServiceHost : IHostedService
         _tracking = tracking;
         _bans = bans;
         _masters = masters;
-        _moneyLog = moneyLog;
-        _statsLog = statsLog;
         _backend = backend;
         _boards = boards;
         _autoPost = autoPost;
@@ -221,20 +212,6 @@ public sealed class BackgroundServiceHost : IHostedService
             });
         }
 
-        /* ---- stats log ----
-           The same cadence as the main tail. It is the same kind of work against a file the
-           same server is writing, and a kill feed running a different interval to the join
-           feed puts the two out of order in a channel where they are read together. */
-        if (_statsLog.Enabled)
-        {
-            _registry.Register(new ServiceDefinition
-            {
-                Name = "stats-log",
-                Interval = _features.LogPollInterval,
-                Tick = ct => _statsLog.TickAsync(ct),
-            });
-        }
-
         // ---- bans ----
         _registry.Register(new ServiceDefinition
         {
@@ -279,32 +256,6 @@ public sealed class BackgroundServiceHost : IHostedService
             Interval = _features.BanReconcileInterval,
             Tick = ct => _bans.ReconcileAsync(ct: ct),
         });
-
-        // ---- economy ----
-        if (_moneyLog.Enabled)
-        {
-            _registry.Register(new ServiceDefinition
-            {
-                Name = "money-log",
-                Interval = _features.MoneyLogInterval,
-                Tick = async ct =>
-                {
-                    var changes = await _moneyLog.TickAsync(ct).ConfigureAwait(false);
-
-                    /* THE SAME DELTAS, READ TWICE. The money log posts them to a feed; the
-                       detector sums them over a window. Hanging the detector off this tick
-                       rather than giving it its own means it sees exactly what was reported,
-                       with no second pass over the ledgers and no chance of the two
-                       disagreeing about what changed. */
-                    foreach (var alert in await _moneyAlerts.ObserveAsync(changes, ct).ConfigureAwait(false))
-                    {
-                        await _audit.RecordAsync("money-alert", "system", alert.Player,
-                            $"earned {alert.Total:N0} across {alert.Events} credit(s) in " +
-                            $"{alert.Window.TotalMinutes:0} minutes", ct).ConfigureAwait(false);
-                    }
-                },
-            });
-        }
 
         if (_payroll.Enabled)
         {

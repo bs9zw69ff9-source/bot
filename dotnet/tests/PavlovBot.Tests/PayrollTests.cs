@@ -419,7 +419,7 @@ public class PayrollTests : IDisposable
     public async Task NoTemporaryFilesAreLeftInTheLedgerDirectory()
     {
         // The write is temp-then-rename so the game never reads a half-written number. A
-        // leftover .tmp would be enumerated by MoneyLog as a player called "Alice.txt.bot".
+        // a leftover .tmp is a file in the ledger directory that is not a ledger.
         PutOnRoster("Alice");
         GiveLedger("Alice", 0);
 

@@ -101,18 +101,6 @@ public sealed class IpTrackingService : PavlovBot.Host.Moderation.IBanEvidence
 
     public event Func<KillEvent, Task>? Kill;
 
-    /// <summary>Whether Stats.log is supplying kills, making this class's scraping redundant.</summary>
-    private bool _statsLogKills;
-
-    /// <summary>
-    /// Stop deriving kills from Pavlov.log, because Stats.log is being read instead.
-    /// </summary>
-    /// <remarks>
-    /// Called after the host is built, once discovery has established whether a Stats.log
-    /// actually exists - which is not known when this service is constructed.
-    /// </remarks>
-    public void UseStatsLogKills() => _statsLogKills = true;
-
     /// <summary>Names that must never be tracked, so master accounts leave no address trail.</summary>
     public HashSet<string> Untracked { get; } = new(StringComparer.OrdinalIgnoreCase);
 
@@ -260,12 +248,6 @@ public sealed class IpTrackingService : PavlovBot.Host.Moderation.IBanEvidence
             await OnLoginAsync(line.File, login, at, ct).ConfigureAwait(false);
             return;
         }
-
-        /* SKIPPED ENTIRELY when Stats.log is being read. Both sources describe the same
-           kill, so leaving this on posts every one of them twice - and this is the worse of
-           the two: three regexes per line, a record reassembled from whichever fragments
-           turned up, no headshot, and a timestamp taken from the clock rather than the log. */
-        if (_statsLogKills) return;
 
         if (PavlovLog.Kill(line.Text) is { } kill)
         {
