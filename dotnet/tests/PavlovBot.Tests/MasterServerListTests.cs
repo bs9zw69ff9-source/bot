@@ -232,6 +232,24 @@ public class MasterServerListTests
     }
 
     [Fact]
+    public void TheDefaultVersionIsShapedLikeAPavlovVersion()
+    {
+        /* A WRONG VERSION IS SILENT. Vankrupt version the URL and not the payload, so a
+           value that is not a real version returns 200 with an empty list - which is
+           indistinguishable from a quiet platform and has a completely different fix.
+
+           This exists because the bump to 1.0.30 was asked for as "1.30", which is a
+           plausible thing to type and returns nothing at all. Three dot-separated numbers is
+           the shape every Pavlov release has had. */
+        var parts = MasterServerList.DefaultVersion.Split('.');
+
+        Assert.Equal(3, parts.Length);
+        Assert.All(parts, part => Assert.True(
+            part.Length > 0 && part.All(char.IsAsciiDigit),
+            $"\"{MasterServerList.DefaultVersion}\" is not a version the master server will recognise"));
+    }
+
+    [Fact]
     public async Task TheDefaultVersionIsUsedWhenNoneIsConfigured()
     {
         var handler = new UrlRecordingHandler();
