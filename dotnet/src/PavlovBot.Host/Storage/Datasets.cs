@@ -64,6 +64,21 @@ public static class Datasets
     /// </remarks>
     public const string NeverBan = "never_ban";
 
+    /// <summary>
+    /// The id RCON uses for a player -> the display name last seen against it.
+    /// </summary>
+    /// <remarks>
+    /// LEARNED FROM THE ROSTER, because nothing else in the bot holds this pairing. The
+    /// evasion registry is keyed on the EOS id that Pavlov.log writes - a 32-character hex
+    /// string - and Stats.log records the id RCON targets, which on a Shack server is a plain
+    /// number. Two identifier spaces that never meet, so a kill read out of Stats.log had
+    /// nothing to resolve against except a roster that happened to be loaded at that instant.
+    ///
+    /// Persisted so a name survives the player leaving, the roster going stale, and a
+    /// restart. Seen once is enough.
+    /// </remarks>
+    public const string PlayerNames = "player_names";
+
     /// <summary>Player -> their warnings, newest last. Escalation counts these.</summary>
     public const string Warnings = "warnings";
 
@@ -160,6 +175,7 @@ public static class Datasets
         [IgnoredNames] = "[]",
         [AutobanExempt] = "{}",
         [NeverBan] = "{}",
+        [PlayerNames] = "{}",
         [Warnings] = "{}",
         [BanReconcileState] = "{}",
         [UnbanTombstones] = "{}",
