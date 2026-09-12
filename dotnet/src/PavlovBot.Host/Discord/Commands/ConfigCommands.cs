@@ -172,11 +172,34 @@ public sealed class SetRolesCommand : ISlashCommand
         var factionLines = _factionOptions
             .Select(o => (Label: o.Faction, Id: map.RoleFor(o.Faction)));
 
+        /* EACH LINE SAYS WHETHER THE BOT CAN SEE YOU HOLDING IT, which is the one fact
+           neither side of a "I set the role and it does nothing" report has. The mapping
+           reading back correctly proves the write worked and proves nothing about the check:
+           a role the bot cannot see on you grants exactly as much as one that was never set,
+           and the two look identical from here. */
         var lines = tiers.Concat(factionLines)
-            .Select(r => $"**{r.Label}** — {(r.Id is { } id ? $"<@&{id}>" : "*not set*")}");
+            .Select(r => $"**{r.Label}** — {(r.Id is { } id ? $"<@&{id}>" : "*not set*")}" +
+                         Standing(_access.StandingOn(command.User, r.Id)));
 
         var embed = Theme.Success("Roles updated", string.Join("\n", lines))
             .AddField("Owners", "Set through the environment, never a role.");
+
+        /* SAID ONCE, not per line. No member means no role check on this interaction could
+           have passed - every tier above reads as not held for a reason that has nothing to
+           do with the mapping, and hunting the mapping is then the wrong search entirely. */
+        if (_access.VisibleRoles(command.User) is not { } visible)
+        {
+            embed.AddField($"{Theme.Warn} The bot cannot read your roles here",
+                "Nothing above can grant you anything in this context - only owner access, which " +
+                "goes by user id, is checked. In a DM your roles come from the staff guild; set " +
+                "`HOME_GUILD_ID` to the guild your staff roles live in.");
+        }
+        else if (visible.Count == 0)
+        {
+            embed.AddField($"{Theme.Warn} The bot sees you with no roles at all",
+                "It can see you as a member and reads zero roles, which usually means the " +
+                "**Server Members Intent** is off in the Discord developer portal.");
+        }
 
         if (_unnameable.Count > 0)
         {
@@ -186,6 +209,15 @@ public sealed class SetRolesCommand : ISlashCommand
 
         await Reply(command, embed).ConfigureAwait(false);
     }
+
+    /// <summary>What the bot sees, appended to a mapped role so the two can be compared.</summary>
+    private static string Standing(RoleStanding standing) => standing switch
+    {
+        RoleStanding.Held => "  ✅ *you hold this*",
+        RoleStanding.NotHeld => "  ❌ *the bot does not see this on you*",
+        RoleStanding.NoMember => "  ⚠️ *your roles could not be read*",
+        _ => "",
+    };
 
     private static Task Reply(SocketSlashCommand command, EmbedBuilder embed) =>
         command.ModifyOriginalResponseAsync(m =>
