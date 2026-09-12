@@ -237,7 +237,28 @@ internal sealed class RconConnection : IAsyncDisposable
                    other than JSON fall through to the CRLF check below. */
                 var text = sb.ToString();
                 if (LooksLikeJson(text) && IsCompleteJson(text)) return text;
-                if (text.EndsWith("\r\n", StringComparison.Ordinal) && !LooksLikeJson(text)) return text;
+
+                /* WHITESPACE IS NOT A REPLY, and accepting it was the whole failure.
+                   This branch settles a non-JSON answer on its trailing CRLF, and a bare
+                   newline satisfied it - so a stray "\r\n" sitting in the socket was returned
+                   AS the answer to whatever had just been sent, while the real reply stayed
+                   unread for the next command to collect.
+
+                   That is precisely the off-by-one the settled flag exists to prevent,
+                   arriving through the one path that reports success: the exchange looked
+                   clean, so the socket was kept, and every command after it read one reply
+                   behind. Permanently, because nothing in that loop ever looks wrong.
+
+                   From outside it was three servers all answering RefreshList with nothing,
+                   for as long as anybody watched. Not returning it means the read continues
+                   and, if nothing else arrives, the command timeout fires - which leaves the
+                   exchange UNSETTLED, drops the socket, and reconnects. A reset is the
+                   correct end to an exchange that has lost track of the stream. */
+                if (text.EndsWith("\r\n", StringComparison.Ordinal) && !LooksLikeJson(text)
+                    && text.AsSpan().Trim().Length > 0)
+                {
+                    return text;
+                }
             }
         }
         finally

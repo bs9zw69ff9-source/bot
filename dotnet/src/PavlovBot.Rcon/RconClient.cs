@@ -250,6 +250,26 @@ public sealed class RconClient : IAsyncDisposable
     /// <summary>Drop cached reads. Exposed so a caller that knows state changed can force a refresh.</summary>
     public void InvalidateReads() => _readCache.Clear();
 
+    /// <summary>
+    /// Drop the session so the next command reconnects.
+    /// </summary>
+    /// <remarks>
+    /// FOR A REPLY THAT ARRIVED AND MADE NO SENSE. The connection layer drops a socket when
+    /// an exchange fails; it has no reason to drop one that completed, and a server answering
+    /// every RefreshList with a refusal or a blank line completes perfectly every time. The
+    /// caller is the only one that knows the answer was unusable, so it is the only one that
+    /// can decide the session is not worth keeping.
+    ///
+    /// Without this the bad state is permanent: the same connection returns the same useless
+    /// reply on every tick, and the roster ages out while the bot reports the same line for
+    /// as long as anybody watches.
+    /// </remarks>
+    public Task ResetSessionAsync(CancellationToken ct = default)
+    {
+        _readCache.Clear();
+        return _connection.ResetAsync(ct);
+    }
+
     /// <remarks>
     /// THE SWEEP IS RATE LIMITED, not run per send. It used to fire on every call once the
     /// map passed 200 entries, so a busy server paid a full O(n) scan on the RCON hot path
