@@ -204,7 +204,14 @@ public static class Program
         builder.Services.AddSingleton<IJsonCodec, SystemTextJsonCodec>();
         builder.Services.AddSingleton<SerializedStore>();
 
-        builder.Services.AddSingleton<RconRegistry>();
+        /* THE STORE IS FOR THE PLAYER-NAME INDEX, learned off each roster refresh. Nothing
+           else in the bot pairs the id RCON uses with a display name: the evasion registry is
+           keyed on the EOS id Pavlov.log writes, which is a different identifier entirely. */
+        builder.Services.AddSingleton(sp => new RconRegistry(
+            sp.GetRequiredService<BotOptions>(),
+            sp.GetRequiredService<MetricsRegistry>(),
+            sp.GetRequiredService<ILogger<RconRegistry>>(),
+            sp.GetRequiredService<SerializedStore>()));
         builder.Services.AddSingleton(sp => new ServiceRegistry(
             sp.GetRequiredService<MetricsRegistry>(),
             sp.GetRequiredService<ILoggerFactory>().CreateLogger<ServiceRegistry>()));
@@ -319,11 +326,17 @@ public static class Program
             sp.GetRequiredService<LogTailer>(),
             sp.GetRequiredService<MetricsRegistry>(),
             sp.GetRequiredService<ILogger<StatsLogService>>(),
-            /* THE LIVE ROSTER FIRST, then the persistent registry. Both players in a kill were
-               online when it happened, so the roster has them by definition and has the name
-               they are using right now; the registry is the fallback for one who left before
-               the line was read. Resolved lazily inside the lambda so this does not depend on
-               registration order. */
+            /* THE ID SPACES ARE NOT THE SAME, which is the thing to know here. Stats.log
+               records the id RCON targets - on a Shack server a plain number like
+               32996677456614126 - while Pavlov.log and the game's ban file carry the EOS id,
+               32 hex characters beginning 0002. The evasion registry is keyed on the second
+               and will therefore never answer for the first.
+
+               So the roster index is the real answer: RconRegistry learns id -> name from
+               every refresh and remembers it. The registry lookup stays as a last resort
+               because a name is a name whichever space it was found in, and it costs a
+               dictionary probe. Resolved lazily so this does not depend on registration
+               order. */
             resolveName: id =>
                 sp.GetRequiredService<RconRegistry>().NameForId(id)
                 ?? sp.GetRequiredService<IpTrackingService>().Account(id)?.Names.FirstOrDefault()));

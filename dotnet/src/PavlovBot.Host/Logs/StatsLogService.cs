@@ -53,10 +53,15 @@ public sealed class StatsLogService
     /// A name for whatever Stats.log wrote in a Killer or Killed field.
     /// </summary>
     /// <remarks>
-    /// STATS.LOG WRITES THE UNIQUE ID, not the display name - so the kill feed was a wall of
-    /// seventeen-digit numbers shooting other seventeen-digit numbers, which is unreadable
-    /// and tells a moderator nothing. The same gap the ban-file importer already had, and it
-    /// is resolved the same way.
+    /// STATS.LOG WRITES THE ID RCON TARGETS, not the display name - so the kill feed was a
+    /// wall of seventeen-digit numbers shooting other seventeen-digit numbers, which is
+    /// unreadable and tells a moderator nothing.
+    ///
+    /// NOT AN EOS ID, and the difference matters. An EOS id is 32 hex characters beginning
+    /// 0002 and is what Pavlov.log and the game's ban file carry; this is the plain number a
+    /// Shack server uses, and the two never meet. The account registry is keyed on the first,
+    /// so it cannot answer for the second however many entries it holds - the roster index is
+    /// what actually resolves these.
     ///
     /// UNRESOLVED IS LEFT ALONE, not replaced with "unknown". Two reasons: the field
     /// sometimes already holds a name, in which case there is nothing to resolve and passing
