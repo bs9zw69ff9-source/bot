@@ -215,7 +215,18 @@ public sealed class WhitelistCommand(RosterService rosters, FactionMembers membe
         /* THE INDEX FOLLOWS THE FILE. Recorded only once the roster write succeeded, so a
            failed add does not leave a membership on record that the game has never heard of -
            /promotion would then act on somebody who is not whitelisted. */
-        var holdRanks = options.GetValueOrDefault("hold_ranks") as bool? ?? false;
+        /* NULL MEANS NOT SUPPLIED, and the difference is the whole of this. hold_ranks is an
+           OPTIONAL boolean that used to be read as `?? false`, so leaving the box unticked
+           wrote false over a preference somebody had already set - and every later add for
+           that member turned it off silently. Fixing a typo in an in-game name does that. So
+           does using the rank option to place them, because both go through here.
+
+           The symptom is not the flag failing to work. It is a promotion stripping the ranks
+           below, long after anybody ticked the box, with nothing in between that looks like
+           it touched the setting. The same rule /setroles and /setrconroles already follow:
+           only what was named is changed. */
+        var holdRanksOption = options.GetValueOrDefault("hold_ranks") as bool?;
+        var holdRanks = holdRanksOption ?? members.Of(member.Id)?.HoldsAllRanks ?? false;
 
         /* RECORDED ON A NO-CHANGE TOO, which is what makes the flag settable at all. Re-running
            add for somebody already whitelisted answers NoChange and writes no roster file - but
@@ -299,11 +310,18 @@ public sealed class WhitelistCommand(RosterService rosters, FactionMembers membe
         var reply = moved && result.Outcome == MembershipOutcome.NoChange
             ? Theme.Success("Whitelist updated", $"**{Sanitize.Code(player)}** — {faction.Name} **{rank}**")
             : Describe(result with { Rank = rank }, player, faction);
-        if (holdRanks && result.Outcome is MembershipOutcome.Allowed or MembershipOutcome.NoChange)
+
+        /* STATED EITHER WAY, not only when it is on. Off is the state somebody is looking at
+           when they report that holding ranks is not working, and a field that simply is not
+           there says nothing about why - it reads the same as the feature not existing. */
+        if (result.Outcome is MembershipOutcome.Allowed or MembershipOutcome.NoChange)
         {
-            reply.AddField("Holds every rank",
-                "They keep the ranks below too, so they hold every loadout up to their own. " +
-            "A demotion still takes back anything above.");
+            reply.AddField(holdRanks ? "Holds every rank" : "Holds one rank",
+                holdRanks
+                    ? "They keep the ranks below too, so they hold every loadout up to their own. " +
+                      "A demotion still takes back anything above."
+                    : "A promotion moves them up and takes the rank below away. " +
+                      "Run this again with `hold_ranks:true` to keep them all.");
         }
 
         await Reply(command, reply).ConfigureAwait(false);
