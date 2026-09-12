@@ -30,9 +30,15 @@ public sealed class StatsLogService
     private readonly ILogger<StatsLogService> _logger;
 
     private readonly IReadOnlyList<string> _paths;
+    private readonly Func<string, string?>? _resolveName;
 
+    /// <param name="resolveName">
+    /// Turns a unique id into a display name. See <see cref="Named"/> for why this is not
+    /// optional in practice.
+    /// </param>
     public StatsLogService(
-        IReadOnlyList<string> paths, LogTailer tailer, MetricsRegistry metrics, ILogger<StatsLogService> logger)
+        IReadOnlyList<string> paths, LogTailer tailer, MetricsRegistry metrics, ILogger<StatsLogService> logger,
+        Func<string, string?>? resolveName = null)
     {
         ArgumentNullException.ThrowIfNull(tailer);
         ArgumentNullException.ThrowIfNull(paths);
@@ -40,6 +46,39 @@ public sealed class StatsLogService
         _tailer = tailer;
         _metrics = metrics;
         _logger = logger;
+        _resolveName = resolveName;
+    }
+
+    /// <summary>
+    /// A name for whatever Stats.log wrote in a Killer or Killed field.
+    /// </summary>
+    /// <remarks>
+    /// STATS.LOG WRITES THE UNIQUE ID, not the display name - so the kill feed was a wall of
+    /// seventeen-digit numbers shooting other seventeen-digit numbers, which is unreadable
+    /// and tells a moderator nothing. The same gap the ban-file importer already had, and it
+    /// is resolved the same way.
+    ///
+    /// UNRESOLVED IS LEFT ALONE, not replaced with "unknown". Two reasons: the field
+    /// sometimes already holds a name, in which case there is nothing to resolve and passing
+    /// it through is exactly right; and an id nobody can name is still worth printing,
+    /// because it is the only handle anybody has on that player.
+    /// </remarks>
+    private string Named(string raw)
+    {
+        if (_resolveName is null) return raw;
+
+        try
+        {
+            var resolved = _resolveName(raw);
+            return string.IsNullOrWhiteSpace(resolved) ? raw : resolved;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            /* A lookup that throws must not cost the kill. The id is a worse line than the
+               name and an infinitely better one than nothing. */
+            _logger.LogDebug(ex, "Could not resolve a name for {Id}", raw);
+            return raw;
+        }
     }
 
     /// <summary>The stats logs found, resolved once at startup.</summary>
@@ -95,7 +134,15 @@ public sealed class StatsLogService
             case StatsKill kill:
                 _metrics.Increment("kills_total",
                     MetricLabels.Of("headshot", kill.Headshot ? "yes" : "no"), help: "Kills read from Stats.log");
-                if (Killed is { } onKill) await onKill(kill).ConfigureAwait(false);
+
+                /* RESOLVED HERE rather than at each consumer. Every one of them wants the
+                   name, and leaving it to them means the next one added quietly prints ids
+                   again. */
+                if (Killed is { } onKill)
+                {
+                    await onKill(kill with { Killer = Named(kill.Killer), Killed = Named(kill.Killed) })
+                        .ConfigureAwait(false);
+                }
                 break;
 
             case StatsRoundState round:
