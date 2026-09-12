@@ -185,6 +185,25 @@ public sealed class Access
     private bool Has(IUser? user, ulong? roleId) =>
         roleId is { } id && Member(user) is { } member && member.RoleIds.Contains(id);
 
+    /// <summary>
+    /// Whether this user holds a role, and whether their roles could be read at all.
+    /// </summary>
+    /// <remarks>
+    /// THE TWO ANSWERS Has COLLAPSES INTO ONE. "false" covers a member the bot cannot see,
+    /// a member whose roles it cannot read, and a member who simply does not have the role -
+    /// three completely different fixes, and from outside the bot they are indistinguishable.
+    /// A mapping that reads correctly and grants nothing is the shape this is for.
+    /// </remarks>
+    public RoleStanding StandingOn(IUser? user, ulong? roleId)
+    {
+        if (roleId is not { } id) return RoleStanding.Unset;
+        if (Member(user) is not { } member) return RoleStanding.NoMember;
+        return member.RoleIds.Contains(id) ? RoleStanding.Held : RoleStanding.NotHeld;
+    }
+
+    /// <summary>Every role id the bot can see on this user, or null when it cannot see them.</summary>
+    public IReadOnlyCollection<ulong>? VisibleRoles(IUser? user) => Member(user)?.RoleIds;
+
     public bool IsSuperOwner(IUser? user)
     {
         if (user is null) return false;
@@ -306,6 +325,22 @@ public sealed class Access
 
         return string.Join("\n", lines);
     }
+}
+
+/// <summary>Where a user stands against one mapped role.</summary>
+public enum RoleStanding
+{
+    /// <summary>No role is mapped to that tier, so nothing can grant it.</summary>
+    Unset,
+
+    /// <summary>The bot cannot see this user as a guild member, so it read no roles at all.</summary>
+    NoMember,
+
+    /// <summary>Seen, and does not have it.</summary>
+    NotHeld,
+
+    /// <summary>Seen, and has it.</summary>
+    Held,
 }
 
 /// <summary>The permission a command requires.</summary>
