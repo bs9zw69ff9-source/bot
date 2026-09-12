@@ -48,7 +48,30 @@ public sealed class IpTrackingService : PavlovBot.Host.Moderation.IBanEvidence
     /// id to send an Unban that actually lifts anything, and has no business with the rest of
     /// this class.
     /// </remarks>
+    /// <summary>The EOS id for a name. Keyed to the evasion flags, NOT to RCON.</summary>
     public string? AccountIdFor(string name) => AccountByName(name)?.Id;
+
+    /// <summary>
+    /// The identifier to put in an RCON command for this player.
+    /// </summary>
+    /// <remarks>
+    /// THE SERVER WORKS IN PLATFORM IDS. Pavlov targets a player by platform account id
+    /// server-side - a plain number - and a command naming anything else is ACCEPTED,
+    /// answered, and enforces nothing. That is the worst failure shape available here: a ban
+    /// that reports success and leaves the player on the server.
+    ///
+    /// So this is the one place that answers "what do I send", and it takes whichever
+    /// identifier the caller happens to hold - a display name off a command, an EOS id off a
+    /// stored ban record, or a platform id already. All three resolve to the same account and
+    /// the same target.
+    ///
+    /// FALLS BACK TO THE EOS ID rather than to null. An account seen before the platform id
+    /// was being recorded has no number yet, and the EOS id is what the bot used to send: no
+    /// worse than before, where null would turn every such ban into a no-op. The fallback
+    /// shrinks to nothing as players rejoin.
+    /// </remarks>
+    public string? RconTargetFor(string? identifier) =>
+        Resolve(identifier) is { } account ? account.PlatformId ?? account.Id : null;
 
     /* EXPLICIT, because the public method answers with a FlagOutcome and the interface must
        not: FlagOutcome lives here, and putting it on IBanEvidence would drag log-ingestion
