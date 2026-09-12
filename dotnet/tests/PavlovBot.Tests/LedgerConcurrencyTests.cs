@@ -57,7 +57,7 @@ public class LedgerConcurrencyTests
            days later and impossible to prove after the fact.
 
            Balances are mutated from four independent places (payroll accrual, arrest fines,
-           the money-log poller, /pay), so concurrent mutation of one player is routine rather
+           /pay), so concurrent mutation of one player is routine rather
            than exotic. */
         var store = new WideningStore();
         var ledger = new Ledger(store);

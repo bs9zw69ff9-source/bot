@@ -23,14 +23,6 @@ public sealed record FeatureOptions
     /// <summary>Pavlov.log paths, comma separated. Empty means auto-detect.</summary>
     public string? LogPaths { get; init; }
 
-    /// <summary>
-    /// Pavlov's Stats.log files, comma separated. Blank derives them from the log paths.
-    /// </summary>
-    /// <remarks>
-    /// The better source for kills: structured JSON, a headshot flag, the game's own
-    /// timestamp, and no dependency on bVerboseLogging. See <c>StatsLogService</c>.
-    /// </remarks>
-    public string? StatsLogPaths { get; init; }
 
     /// <summary>Where the game keeps its whitelist .txt rosters. Null disables the faction commands.</summary>
     public string? RosterDirectory { get; init; }
@@ -91,7 +83,6 @@ public sealed record FeatureOptions
 
     public string? JoinWebhook { get; init; }
     public string? KillWebhook { get; init; }
-    public string? MoneyWebhook { get; init; }
 
     /// <summary>The address-bearing connection feed. Private channels only.</summary>
     public string? ConnectWebhook { get; init; }
@@ -150,11 +141,7 @@ public sealed record FeatureOptions
 
     // ---- money anomaly detection ----
 
-    /// <summary>Earnings inside the window above which a player is flagged. Zero disables it.</summary>
-    public long MoneyAlertThreshold { get; init; }
 
-    /// <summary>The window those earnings are summed over.</summary>
-    public TimeSpan MoneyAlertWindow { get; init; } = TimeSpan.FromMinutes(15);
 
     /// <summary>Whether a crashed server is restarted automatically. Off unless asked for.</summary>
     public bool CrashRecovery { get; init; }
@@ -279,7 +266,6 @@ public sealed record FeatureOptions
     public string? PavlovVersion { get; init; }
 
     public TimeSpan LogPollInterval { get; init; } = TimeSpan.FromMilliseconds(1500);
-    public TimeSpan MoneyLogInterval { get; init; } = TimeSpan.FromSeconds(10);
     /// <summary>
     /// How often the boards redraw. Also how long after a restart the first one appears.
     /// </summary>
@@ -305,7 +291,6 @@ public sealed record FeatureOptions
         {
             LedgerDirectory = Text(configuration, "MODSAVE_PATH"),
             LogPaths = Text(configuration, "PAVLOV_LOGS"),
-            StatsLogPaths = Text(configuration, "STATS_LOGS"),
             PavlovVersion = Text(configuration, "PAVLOV_VERSION"),
             RosterDirectory = Text(configuration, "FACTION_ROLES_PATH"),
             FactionsPath = Text(configuration, "FACTIONS_PATH"),
@@ -355,7 +340,6 @@ public sealed record FeatureOptions
             ArrestChannel = Snowflake(configuration, "ARREST_CHANNEL"),
             JoinWebhook = Text(configuration, "JOIN_WEBHOOK_URL"),
             KillWebhook = Text(configuration, "KILL_WEBHOOK_URL"),
-            MoneyWebhook = Text(configuration, "MONEY_WEBHOOK_URL"),
 
             LeaderboardChannel = Snowflake(configuration, "LEADERBOARD_CHANNEL"),
             ArrestBoardChannel = Snowflake(configuration, "ARREST_LEADERBOARD_CHANNEL"),
@@ -366,8 +350,6 @@ public sealed record FeatureOptions
             EventRetentionDays = Int(configuration, "EVENT_RETENTION_DAYS", 90),
             PayrollFaction = Text(configuration, "PAYROLL_FACTION") ?? "NYPD",
 
-            MoneyAlertThreshold = Money(configuration, "MONEY_ALERT_THRESHOLD"),
-            MoneyAlertWindow = Minutes(configuration, "MONEY_ALERT_WINDOW_MINUTES", TimeSpan.FromMinutes(15)),
 
             CrashRecovery = Flag(configuration, "CRASH_RECOVERY"),
             PlayerCountChannels = Snowflakes(configuration, "PLAYER_COUNT_CHANNELS"),
@@ -412,7 +394,6 @@ public sealed record FeatureOptions
             EnabledPlugins = List(configuration, "PLUGINS_ENABLED"),
             DisabledPlugins = List(configuration, "PLUGINS_DISABLED"),
 
-            MoneyLogInterval = Milliseconds(configuration, "MONEY_LOG_INTERVAL_MS", TimeSpan.FromSeconds(10)),
             LeaderboardInterval = Milliseconds(configuration, "LEADERBOARD_INTERVAL_MS", TimeSpan.FromMinutes(1)),
         };
     }
@@ -502,16 +483,12 @@ public sealed record FeatureOptions
         $"systemd units: {string.Join(", ", PavlovUnits)}",
         $"join feed: {(JoinWebhook is null ? "off" : "on")}",
         $"kill feed: {(KillWebhook is null ? "off" : "on")}",
-        $"money feed: {(MoneyWebhook is null ? "off" : "on")}",
         $"cash leaderboard: {(LeaderboardChannel is null ? "off (LEADERBOARD_CHANNEL not set)" : $"channel {LeaderboardChannel}, every {LeaderboardInterval.TotalSeconds:0}s")}",
         $"arrest board: {(ArrestBoardChannel is null ? "off (ARREST_LEADERBOARD_CHANNEL not set)" : $"channel {ArrestBoardChannel}")}",
         $"warrant board: {(WarrantBoardChannel is null ? "off (WARRANT_BOARD_CHANNEL not set)" : $"channel {WarrantBoardChannel}")}",
         $"payroll: {(PayrollAmount <= 0
             ? "off (PAYROLL_AMOUNT not set)"
             : $"{PayrollAmount:N0} to on-duty {PayrollFaction} every {PayrollInterval.TotalMinutes:0}m")}",
-        $"money alerts: {(MoneyAlertThreshold <= 0
-            ? "off (MONEY_ALERT_THRESHOLD not set)"
-            : $"over {MoneyAlertThreshold:N0} earned in {MoneyAlertWindow.TotalMinutes:0}m")}",
         $"crash recovery: {(CrashRecovery
             ? $"on - a failed unit is restarted, up to {Servers.CrashRecovery.MaxAttempts}x per {Servers.CrashRecovery.AttemptWindow.TotalMinutes:0}m"
             : "off (CRASH_RECOVERY not set)")}",

@@ -2,8 +2,6 @@ using System.Collections.Concurrent;
 using Microsoft.Extensions.Logging;
 using PavlovBot.Host.Configuration;
 using PavlovBot.Host.Observability;
-using PavlovBot.Core.Data;
-using PavlovBot.Host.Storage;
 using PavlovBot.Rcon;
 using PavlovBot.Rcon.Protocol;
 
@@ -47,10 +45,6 @@ public sealed class RconRegistry : IAsyncDisposable, IOnlineRoster
     private readonly ConcurrentDictionary<string, RosterSnapshot> _rosters = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, string?> _lastError = new(StringComparer.Ordinal);
     private readonly MetricsRegistry _metrics;
-    private readonly SerializedStore? _store;
-
-    /// <summary>The learned id -> name index, kept in memory so a lookup touches no disk.</summary>
-    private readonly Dictionary<string, string> _names;
     private readonly ILogger<RconRegistry> _logger;
 
     /// <summary>
@@ -77,15 +71,11 @@ public sealed class RconRegistry : IAsyncDisposable, IOnlineRoster
     /// <summary>A roster older than this is stale - reported, not silently served as current.</summary>
     private static readonly TimeSpan RosterFreshness = TimeSpan.FromSeconds(90);
 
-    public RconRegistry(BotOptions options, MetricsRegistry metrics, ILogger<RconRegistry> logger,
-        SerializedStore? store = null)
+    public RconRegistry(BotOptions options, MetricsRegistry metrics, ILogger<RconRegistry> logger)
     {
         ArgumentNullException.ThrowIfNull(options);
         _metrics = metrics;
         _logger = logger;
-        _store = store;
-        _names = store?.ReadMap(Datasets.PlayerNames, new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase))
-                 ?? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
         _clients = options.Servers
             .Select(s => s with { IdleTimeout = HoldOpen(s.IdleTimeout, options.RconHealthInterval) })
@@ -195,75 +185,6 @@ public sealed class RconRegistry : IAsyncDisposable, IOnlineRoster
         foreach (var client in _clients.Values) client.InvalidateReads();
     }
 
-    /// <summary>
-    /// The display name behind a unique id, from the live rosters.
-    /// </summary>
-    /// <remarks>
-    /// THE BEST SOURCE FOR A KILL, because both players were online when it happened - the
-    /// roster that is refreshed on a timer has them both by definition. The persistent
-    /// registry is the fallback for somebody who has since left, and it only knows the names
-    /// it has seen logged.
-    /// </remarks>
-    public string? NameForId(string? uniqueId)
-    {
-        if (string.IsNullOrWhiteSpace(uniqueId)) return null;
-
-        foreach (var roster in _rosters.Values)
-        {
-            foreach (var player in roster.Players)
-            {
-                if (player.Name.Length > 0 && string.Equals(player.UniqueId, uniqueId, StringComparison.OrdinalIgnoreCase))
-                    return player.Name;
-            }
-        }
-
-        /* THEN WHAT WE HAVE EVER SEEN. The live rosters answer for somebody standing on a
-           server right now and nothing else - so a player who disconnected after the kill,
-           or a roster that was stale because RefreshList was failing, resolved to nothing and
-           the raw id went into the feed. Both of those happened.
-
-           Seen once is enough, and it survives a restart. */
-        return _names.TryGetValue(uniqueId, out var known) && known.Length > 0 ? known : null;
-    }
-
-    /// <summary>
-    /// Remember the names on a roster against the ids RCON uses for them.
-    /// </summary>
-    /// <remarks>
-    /// WRITTEN ONLY ON A CHANGE. This runs on the refresh tick, and rewriting an unchanged
-    /// map every few seconds for the life of the process is a lot of disk for nothing.
-    /// </remarks>
-    private async Task LearnNamesAsync(IReadOnlyList<PavlovPlayer> players, CancellationToken ct)
-    {
-        if (_store is null) return;
-
-        var fresh = players
-            .Where(p => p.Name.Length > 0 && p.UniqueId.Length > 0)
-            .Where(p => !_names.TryGetValue(p.UniqueId, out var known) || !string.Equals(known, p.Name, StringComparison.Ordinal))
-            .ToList();
-
-        if (fresh.Count == 0) return;
-
-        foreach (var player in fresh) _names[player.UniqueId] = player.Name;
-
-        try
-        {
-            await _store.UpdateMapAsync(Datasets.PlayerNames,
-                new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase),
-                stored =>
-                {
-                    foreach (var player in fresh) stored[player.UniqueId] = player.Name;
-                    return stored;
-                }, ct).ConfigureAwait(false);
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            // The in-memory copy is already updated, so this costs persistence across a
-            // restart and nothing in this session.
-            _logger.LogDebug(ex, "Could not persist the player-name index");
-        }
-    }
-
     /// <summary>Every distinct player name across every server.</summary>
     public IReadOnlyList<string> AllOnlinePlayers() =>
         _rosters.Values
@@ -337,7 +258,6 @@ public sealed class RconRegistry : IAsyncDisposable, IOnlineRoster
 
                     var players = RefreshList.Players(document.RootElement);
                     _rosters[server] = new RosterSnapshot(server, players, DateTimeOffset.UtcNow);
-                    await LearnNamesAsync(players, ct).ConfigureAwait(false);
                     Recovered(server);
 
                     _metrics.Gauge("players_online", players.Count, MetricLabels.Of("server", server),

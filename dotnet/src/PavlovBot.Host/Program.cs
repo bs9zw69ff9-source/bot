@@ -204,14 +204,7 @@ public static class Program
         builder.Services.AddSingleton<IJsonCodec, SystemTextJsonCodec>();
         builder.Services.AddSingleton<SerializedStore>();
 
-        /* THE STORE IS FOR THE PLAYER-NAME INDEX, learned off each roster refresh. Nothing
-           else in the bot pairs the id RCON uses with a display name: the evasion registry is
-           keyed on the EOS id Pavlov.log writes, which is a different identifier entirely. */
-        builder.Services.AddSingleton(sp => new RconRegistry(
-            sp.GetRequiredService<BotOptions>(),
-            sp.GetRequiredService<MetricsRegistry>(),
-            sp.GetRequiredService<ILogger<RconRegistry>>(),
-            sp.GetRequiredService<SerializedStore>()));
+        builder.Services.AddSingleton<RconRegistry>();
         builder.Services.AddSingleton(sp => new ServiceRegistry(
             sp.GetRequiredService<MetricsRegistry>(),
             sp.GetRequiredService<ILoggerFactory>().CreateLogger<ServiceRegistry>()));
@@ -316,30 +309,6 @@ public static class Program
         builder.Services.AddSingleton<FeedWebhooks>();
         builder.Services.AddSingleton<PavlovBot.Host.Logs.ServerLabels>();
         builder.Services.AddSingleton<FeedBridge>();
-        /* DISCOVERED ONCE, at registration, so the paths the tick polls and the paths the
-           wiring decision is made from cannot disagree. The logger is passed here and not to
-           the LogTailer.Discover call feeding it, because that one runs again inside the
-           background host and would say everything twice. */
-        builder.Services.AddSingleton(sp => new StatsLogService(
-            StatsLogService.Discover(features.StatsLogPaths, LogTailer.Discover(features.LogPaths),
-                sp.GetRequiredService<ILogger<StatsLogService>>()),
-            sp.GetRequiredService<LogTailer>(),
-            sp.GetRequiredService<MetricsRegistry>(),
-            sp.GetRequiredService<ILogger<StatsLogService>>(),
-            /* THE ID SPACES ARE NOT THE SAME, which is the thing to know here. Stats.log
-               records the id RCON targets - on a Shack server a plain number like
-               32996677456614126 - while Pavlov.log and the game's ban file carry the EOS id,
-               32 hex characters beginning 0002. The evasion registry is keyed on the second
-               and will therefore never answer for the first.
-
-               So the roster index is the real answer: RconRegistry learns id -> name from
-               every refresh and remembers it. The registry lookup stays as a last resort
-               because a name is a name whichever space it was found in, and it costs a
-               dictionary probe. Resolved lazily so this does not depend on registration
-               order. */
-            resolveName: id =>
-                sp.GetRequiredService<RconRegistry>().NameForId(id)
-                ?? sp.GetRequiredService<IpTrackingService>().Account(id)?.Names.FirstOrDefault()));
         builder.Services.AddSingleton<EvasionResponder>();
         /* Acts on a VPN verdict. Without it the screening ran on every connection, decided
            a ban, and nothing read the decision. */
@@ -352,8 +321,6 @@ public static class Program
             sp.GetRequiredService<MetricsRegistry>(),
             sp.GetRequiredService<ILogger<VpnResponder>>(),
             features.VpnAutoBan));
-        builder.Services.AddSingleton(sp => new MoneyLog(
-            features.LedgerDirectory, sp.GetRequiredService<FeedWebhooks>(), sp.GetRequiredService<ILogger<MoneyLog>>()));
         /* ---- timeline ----
            A REAL TABLE, in the same bot.db, because this is the one dataset the key-value
            document store cannot hold: it is append-heavy and its queries are all "this
@@ -382,7 +349,6 @@ public static class Program
         builder.Services.AddSingleton<ISlashCommand, ServerStatsCommand>();
         builder.Services.AddSingleton<ISlashCommand, PluginsCommand>();
         builder.Services.AddSingleton<ISlashCommand, FactionStatsCommand>();
-        builder.Services.AddSingleton<ISlashCommand, EconomyIntelCommand>();
         builder.Services.AddSingleton<ISlashCommand, StaffStatsCommand>();
         /* The roster is what decides whether a ledger may be written at all - see
            LedgerFileStore. Resolved lazily through the provider because RconRegistry is
@@ -497,11 +463,6 @@ public static class Program
             features.PayrollAmount, features.PayrollInterval, features.PayrollFaction));
 
         builder.Services.AddSingleton<ISlashCommand, WagesCommand>();
-
-        builder.Services.AddSingleton(sp => new PavlovBot.Host.Economy.MoneyAnomalyDetector(
-            sp.GetRequiredService<SerializedStore>(),
-            sp.GetRequiredService<ILogger<PavlovBot.Host.Economy.MoneyAnomalyDetector>>(),
-            features.MoneyAlertThreshold, features.MoneyAlertWindow));
 
         builder.Services.AddSingleton<ISlashCommand, RotateMapCommand>();
         builder.Services.AddSingleton<ISlashCommand, ServerSwitchCommand>();
@@ -754,7 +715,6 @@ public static class Program
         feeds.Register(FeedWebhooks.Join, features.JoinWebhook);
         feeds.Register(FeedWebhooks.Connect, features.ConnectWebhook);
         feeds.Register(FeedWebhooks.Kill, features.KillWebhook);
-        feeds.Register(FeedWebhooks.Money, features.MoneyWebhook);
         feeds.Register(FeedWebhooks.Staff, features.StaffWebhook);
 
         /* Said out loud at startup, at INFORMATION. A feed with no URL is a choice and a
@@ -914,22 +874,7 @@ public static class Program
         /* RESOLVED, not just registered. The bridge subscribes to the tracker's events in
            its constructor, and a service nobody asks for is never constructed - which is
            exactly how the join, connect and kill feeds came to be silent. */
-        var bridge = host.Services.GetRequiredService<FeedBridge>();
-
-        /* KILLS COME FROM Stats.log WHEN THERE IS ONE. Both sources describe the same kill,
-           so this switches rather than adds - the tracker stops scraping Pavlov.log for them
-           at the same moment the bridge starts listening to the stats reader. Wired here
-           because it depends on discovery having found a file, which is not known when
-           either service is constructed. */
-        var stats = host.Services.GetRequiredService<StatsLogService>();
-        if (stats.Enabled)
-        {
-            bridge.UseStatsLog(stats);
-            host.Services.GetRequiredService<IpTrackingService>().UseStatsLogKills();
-            logger.LogInformation(
-                "Kills are coming from Stats.log ({Count} file(s)) - with headshots and the game's own timestamps",
-                stats.Paths.Count);
-        }
+        host.Services.GetRequiredService<FeedBridge>();
 
         /* Same reason, and this one matters more: the responder subscribes to the tracker's
            Flagged event in its constructor. Registered but never resolved, ban-evasion
